@@ -20,6 +20,13 @@ return {
 
 		require("neo-tree").setup({
 			close_if_last_window = true,
+			filesystem = {
+				filtered_items = {
+					visible = true,
+					hide_dotfiles = false,
+					hide_gitignored = false,
+				}
+			},
 			window = {
 				position = 'right',
 				hijack_netrw_behavior = "open_default", -- netrw disabled, opening a directory opens neo-tree
@@ -27,6 +34,26 @@ return {
 				-- "open_current",  -- netrw disabled, opening a directory opens within the
 				-- window like netrw would, regardless of window.position
 				-- "disabled",    -- netrw left alone, neo-tree does not handle opening dirs
+			},
+			icon = {
+				folder_closed = "",
+				folder_open = "",
+				folder_empty = "󰜌",
+				provider = function(icon, node, state)     -- default icon provider utilizes nvim-web-devicons if available
+					if node.type == "file" or node.type == "terminal" then
+						local success, web_devicons = pcall(require, "nvim-web-devicons")
+						local name = node.type == "terminal" and "terminal" or node.name
+						if success then
+							local devicon, hl = web_devicons.get_icon(name)
+							icon.text = devicon or icon.text
+							icon.highlight = hl or icon.highlight
+						end
+					end
+				end,
+				-- The next two settings are only a fallback, if you use nvim-web-devicons and configure default icons there
+				-- then these will never be used.
+				default = "*",
+				highlight = "NeoTreeFileIcon"
 			},
 			git_status = {
 				symbols = {
