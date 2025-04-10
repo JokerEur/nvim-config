@@ -1,5 +1,3 @@
---TODO
-
 return {
 	"ellisonleao/gruvbox.nvim",
 	config = function()
