@@ -6,10 +6,52 @@ return {
 		branch = "0.1.x",
 		cmd = "Telescope",
 		keys = {
-			{ "<leader>ff", function() require("telescope.builtin").find_files() end, desc = "Find Files" },
-			{ "<leader>fg", function() require("telescope.builtin").live_grep() end,  desc = "Live Grep" },
-			{ "<leader>fb", function() require("telescope.builtin").buffers() end,    desc = "Find Buffers" },
-			{ "<leader>fh", function() require("telescope.builtin").help_tags() end,  desc = "Find Help Tags" },
+			{
+				"<leader>ff",
+				function()
+					require("telescope.builtin").find_files()
+				end,
+				desc = "Find Files",
+			},
+			{
+				"<leader>fw",
+				function()
+					require("telescope.builtin").grep_string()
+				end,
+				desc = "Find Word",
+			},
+			{
+				"<leader>fg",
+				function()
+					require("telescope.builtin").live_grep()
+				end,
+				desc = "Live Grep",
+			},
+			{
+				"<leader>fb",
+				function()
+					require("telescope.builtin").buffers()
+				end,
+				desc = "Find Buffers",
+			},
+			{
+				"<leader>fh",
+				function()
+					require("telescope.builtin").help_tags()
+				end,
+				desc = "Find Help Tags",
+			},
+
+			{
+				"<leader>gs",
+				function()
+					local input = vim.fn.input("Grep for > ")
+					if input ~= "" then
+						require("telescope.builtin").grep_string({ search = input })
+					end
+				end,
+				desc = "Grep String (Prompt)",
+			},
 		},
 		dependencies = { "nvim-telescope/telescope-ui-select.nvim" },
 		config = function()
@@ -43,24 +85,23 @@ return {
 						"--smart-case",
 						"--hidden",
 					},
-				}
+				},
 			})
 		end,
 	},
 
 	-- UI-Select Plugin (Ensures it loads properly)
 	{
-		'nvim-telescope/telescope-ui-select.nvim',
+		"nvim-telescope/telescope-ui-select.nvim",
 		config = function()
-			require('telescope').setup({
+			require("telescope").setup({
 				extensions = {
 					["ui-select"] = {
-						require("telescope.themes").get_dropdown {
-						}
-					}
-				}
+						require("telescope.themes").get_dropdown({}),
+					},
+				},
 			})
 			require("telescope").load_extension("ui-select")
-		end
-	} }
-
+		end,
+	},
+}

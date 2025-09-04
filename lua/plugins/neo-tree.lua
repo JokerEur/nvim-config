@@ -23,15 +23,15 @@ return {
 			-- Filesystem configuration
 			filesystem = {
 				filtered_items = {
-					visible = true,          -- Show hidden files by default
-					hide_dotfiles = false,   -- Show dotfiles
+					visible = true, -- Show hidden files by default
+					hide_dotfiles = false, -- Show dotfiles
 					hide_gitignored = false, -- Show git-ignored files
 				},
 			},
 
 			-- Window position and behavior
 			window = {
-				position = "right",                     -- Position the NeoTree on the right
+				position = "right",         -- Position the NeoTree on the right
 				hijack_netrw_behavior = "open_default", -- When opening a directory, open NeoTree instead of netrw
 				-- Other options:
 				-- "open_current" - Open in the current window (like netrw)
@@ -55,7 +55,7 @@ return {
 						end
 					end
 				end,
-				default = "*",                 -- Default icon
+				default = "*",     -- Default icon
 				highlight = "NeoTreeFileIcon", -- Icon highlight group
 			},
 
@@ -81,5 +81,5 @@ return {
 		-- Optional improvements for user experience:
 		-- Auto-resize NeoTree window when opening
 		vim.cmd([[autocmd FileType neo-tree setlocal winwidth=30]])
-	end
+	end,
 }
