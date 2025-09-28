@@ -102,24 +102,46 @@ local function float_preview(contents, filetype, opts)
 end
 
 -- ===============================
--- Hover & signature caches
+-- Hover & Signature Caches
 -- ===============================
 local hover_cache = {}
 local signature_cache = {}
 
+local function float_preview(contents, filetype, opts)
+	opts = opts or {}
+	opts.border = opts.border or "rounded"
+	local bufnr, winnr = vim.lsp.util.open_floating_preview(contents, filetype, opts)
+	if winnr and vim.api.nvim_win_is_valid(winnr) then
+		vim.api.nvim_win_set_option(winnr, "winhl", "Normal:NormalFloat,FloatBorder:FloatBorder")
+		vim.api.nvim_win_set_option(winnr, "winblend", 0)
+		-- Fade-in effect
+		local fade_steps, fade_delay = 5, 10
+		for i = 0, fade_steps do
+			vim.defer_fn(function()
+				if vim.api.nvim_win_is_valid(winnr) then
+					vim.api.nvim_win_set_option(winnr, "winblend", math.floor(100 - (i / fade_steps) * 100))
+				end
+			end, i * fade_delay)
+		end
+	end
+	return bufnr, winnr
+end
+
 local function hover_with_cache()
 	local pos = vim.api.nvim_win_get_cursor(0)
 	local key = vim.fn.expand("%:p") .. ":" .. pos[1] .. ":" .. pos[2]
+
 	if hover_cache[key] then
 		float_preview(hover_cache[key], "markdown", { max_width = 80 })
 		return
 	end
+
 	local clients = vim.lsp.get_clients({ bufnr = 0 })
 	if #clients == 0 then
 		return
 	end
-	local encoding = clients[1].offset_encoding or "utf-16"
-	local params = vim.lsp.util.make_position_params(nil, encoding)
+
+	local params = vim.lsp.util.make_position_params()
 	vim.lsp.buf_request(0, "textDocument/hover", params, function(err, result)
 		if err or not result or not result.contents then
 			return
@@ -131,6 +153,7 @@ local function hover_with_cache()
 		if vim.tbl_isempty(lines) then
 			return
 		end
+
 		hover_cache[key] = lines
 		vim.schedule(function()
 			float_preview(lines, "markdown", { max_width = 80 })
@@ -141,16 +164,18 @@ end
 local function signature_with_cache()
 	local pos = vim.api.nvim_win_get_cursor(0)
 	local key = vim.fn.expand("%:p") .. ":" .. pos[1] .. ":" .. pos[2]
+
 	if signature_cache[key] then
 		float_preview(signature_cache[key], "markdown", { max_width = 80 })
 		return
 	end
+
 	local clients = vim.lsp.get_clients({ bufnr = 0 })
 	if #clients == 0 then
 		return
 	end
-	local encoding = clients[1].offset_encoding or "utf-16"
-	local params = vim.lsp.util.make_position_params(nil, encoding)
+
+	local params = vim.lsp.util.make_position_params()
 	vim.lsp.buf_request(0, "textDocument/signatureHelp", params, function(err, result)
 		if err or not result or not result.signatures then
 			return
@@ -162,6 +187,7 @@ local function signature_with_cache()
 		if vim.tbl_isempty(lines) then
 			return
 		end
+
 		signature_cache[key] = lines
 		vim.schedule(function()
 			float_preview(lines, "markdown", { max_width = 80 })
@@ -169,6 +195,7 @@ local function signature_with_cache()
 	end)
 end
 
+-- Clear cache on buffer changes
 vim.api.nvim_create_autocmd({ "TextChanged", "TextChangedI" }, {
 	pattern = "*",
 	callback = function()
@@ -186,14 +213,11 @@ vim.api.nvim_create_autocmd({ "TextChanged", "TextChangedI" }, {
 	end,
 })
 
-local function normalize_offset_encoding(client)
-	if client.offset_encoding ~= "utf-16" then
-		client.offset_encoding = "utf-16"
-	end
-end
-
+-- ===============================
+-- on_attach
+-- ===============================
 local function on_attach(client, bufnr)
-	normalize_offset_encoding(client)
+	-- Disable formatting for specific servers
 	if client.name == "tsserver" or client.name == "volar" or client.name == "ts_ls" or client.name == "vue_ls" then
 		client.server_capabilities.documentFormattingProvider = false
 	end
@@ -205,11 +229,19 @@ local function on_attach(client, bufnr)
 	map("K", hover_with_cache, "Hover Documentation (cached)")
 	map("<C-k>", signature_with_cache, "Signature Help (cached)")
 
+	-- Override diagnostics float to include fade-in
 	local orig_open_float = vim.diagnostic.open_float
 	vim.diagnostic.open_float = function(...)
 		local bufnr, winnr = orig_open_float(...)
 		if winnr and vim.api.nvim_win_is_valid(winnr) then
-			fade_in(winnr)
+			local fade_steps, fade_delay = 5, 10
+			for i = 0, fade_steps do
+				vim.defer_fn(function()
+					if vim.api.nvim_win_is_valid(winnr) then
+						vim.api.nvim_win_set_option(winnr, "winblend", math.floor(100 - (i / fade_steps) * 100))
+					end
+				end, i * fade_delay)
+			end
 		end
 		return bufnr, winnr
 	end
@@ -241,15 +273,15 @@ end
 -- ===============================
 return {
 	-- Rust tools
-	{
-		"simrat39/rust-tools.nvim",
-		ft = "rust",
-		config = function()
-			require("rust-tools").setup({
-				server = { on_attach = on_attach, capabilities = capabilities, root_dir = get_project_root },
-			})
-		end,
-	},
+	-- {
+	-- 	"simrat39/rust-tools.nvim",
+	-- 	ft = "rust",
+	-- 	config = function()
+	-- 		require("rust-tools").setup({
+	-- 			server = { on_attach = on_attach, capabilities = capabilities, root_dir = get_project_root },
+	-- 		})
+	-- 	end,
+	-- },
 
 	-- Mason
 	{ "williamboman/mason.nvim", cmd = "Mason", config = true },
