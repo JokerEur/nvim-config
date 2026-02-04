@@ -6,7 +6,7 @@ return {
 		config = function()
 			local ts_configs = require("nvim-treesitter.configs")
 
-			-- Disable Treesitter for large files
+			-- Disable Treesitter for large files (over ~256 KB)
 			local function disable_large_files(_, buf)
 				local max_filesize = 256 * 1024 -- 256 KB
 				local fname = vim.api.nvim_buf_get_name(buf)
@@ -54,11 +54,16 @@ return {
 					disable = disable_large_files,
 				},
 
-				rainbow = {
+				incremental_selection = {
 					enable = true,
-					extended_mode = true, -- Also highlight non-bracket delimiters
-					max_file_lines = 1000,
+					keymaps = {
+						init_selection = "gnn",
+						node_incremental = "grn",
+						scope_incremental = "grc",
+						node_decremental = "grm",
+					},
 				},
+
 			})
 		end,
 	},

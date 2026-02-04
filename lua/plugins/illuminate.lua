@@ -2,31 +2,35 @@ return {
 	'RRethy/vim-illuminate',
 	event = { "BufReadPost", "BufNewFile" }, -- Load only when editing a file
 	config = function()
-		require('illuminate').configure({
+	local illuminate = require('illuminate')
+	illuminate.configure({
 			providers = {
-				'lsp',    -- Use LSP-based highlighting as primary provider
-				'treesitter', -- Treesitter-based highlighting (fallback)
-				'regex',  -- Regex-based highlighting (last resort)
+				'lsp',        -- Prefer precise LSP locations
+				'treesitter', -- Fallback when no LSP info
+				'regex',      -- Last resort
 			},
 
-			delay = 50, -- Faster response time (default: 100ms)
+			-- Small, but not instant, to reduce flicker & CPU
+			delay = 80,
 
 			filetype_overrides = {},
 
 			-- Deny UI-related and non-code buffers for efficiency
 			filetypes_denylist = {
 				'dirbuf', 'dirvish', 'fugitive',
-				'nerdtree', 'packer', 'lazy', 'help',
+				'neo-tree', 'nerdtree', 'packer', 'lazy', 'help',
 				'qf', 'dashboard', 'alpha', 'log', 'man',
 				'toggleterm', 'terminal', 'nofile', 'prompt',
 			},
 
 			filetypes_allowlist = {},
 
-			modes_denylist = {},
+			-- Do not highlight while typing; only in normal/visual
+			modes_denylist = { 'i' },
 			modes_allowlist = {},
 
-			providers_regex_syntax_denylist = {},
+			-- Avoid matching inside comments/strings for regex provider
+			providers_regex_syntax_denylist = { 'comment', 'string' },
 			providers_regex_syntax_allowlist = {},
 
 			under_cursor = true, -- Highlight word under cursor
@@ -34,7 +38,7 @@ return {
 			-- Optimize large file handling to avoid performance drops
 			large_file_cutoff = 3000, -- Reduce impact on large files (default: 5000)
 			large_file_overrides = {
-				delay = 200,         -- Slightly increase delay for large files
+				delay = 200,           -- Slightly increase delay for large files
 				providers = { 'lsp' }, -- Only use LSP for large files
 			},
 
@@ -51,5 +55,43 @@ return {
 
 			case_insensitive_regex = false, -- Keep regex case-sensitive for precision
 		})
+
+		-- Underline-only highlight for illuminated words (no background fill)
+		local function set_illuminate_highlights()
+			local ok = pcall(vim.api.nvim_set_hl, 0, 'IlluminatedWordText', {
+				underline = true,
+				bold = false,
+			})
+			if not ok then return end
+
+			vim.api.nvim_set_hl(0, 'IlluminatedWordRead', {
+				underline = true,
+				bold = false,
+			})
+
+			vim.api.nvim_set_hl(0, 'IlluminatedWordWrite', {
+				underline = true,
+				bold = false,
+			})
+		end
+
+		set_illuminate_highlights()
+		vim.api.nvim_create_autocmd('ColorScheme', {
+			callback = set_illuminate_highlights,
+		})
+
+		-- Developer helpers: jump between references and toggle
+		local map_opts = { noremap = true, silent = true }
+		vim.keymap.set('n', ']r', function()
+			illuminate.goto_next_reference(false)
+		end, vim.tbl_extend('keep', { desc = 'Next reference (illuminate)' }, map_opts))
+
+		vim.keymap.set('n', '[r', function()
+			illuminate.goto_prev_reference(false)
+		end, vim.tbl_extend('keep', { desc = 'Previous reference (illuminate)' }, map_opts))
+
+		vim.keymap.set('n', '<leader>ui', '<cmd>IlluminateToggle<CR>', vim.tbl_extend('keep', {
+			desc = 'Toggle word highlighting (illuminate)',
+		}, map_opts))
 	end
 }

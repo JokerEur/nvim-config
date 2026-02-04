@@ -1,413 +1,373 @@
--- ===============================
--- Universal project root detection
--- ===============================
-local function get_project_root(fname)
-	fname = fname or vim.api.nvim_buf_get_name(0)
-	local dir = vim.fn.fnamemodify(fname, ":p:h")
+-- ========================================================-- =========================================================
+-- Fast & deterministic project root detection
+-- =========================================================
 
-	local root_markers = {
-		".git",
-		"package.json",
-		"pyproject.toml",
-		"setup.py",
-		"requirements.txt",
-		"go.mod",
-		"Cargo.toml",
-		"compile_commands.json",
-		"Makefile",
-		"build.gradle",
-		"pom.xml",
-		"mix.exs",
-		"Gemfile",
-	}
+local ROOT_MARKERS = {
+  ".git",
+  "pyproject.toml",
+  "go.mod",
+  "Cargo.toml",
+  "package.json",
+  "requirements.txt",
+  "mix.exs",
+}
 
-	local function is_root(d)
-		for _, marker in ipairs(root_markers) do
-			if vim.fn.globpath(d, marker) ~= "" then
-				return true
-			end
-		end
-		return false
-	end
-
-	while dir ~= "/" do
-		if is_root(dir) then
-			return dir
-		end
-		dir = vim.fn.fnamemodify(dir, ":h")
-	end
-
-	if vim.fn.isdirectory(vim.fn.fnamemodify(fname, ":p:h")) == 1 then
-		return vim.fn.fnamemodify(fname, ":p:h")
-	end
-
-	return vim.fn.getcwd()
+local function get_project_root(bufnr)
+  bufnr = bufnr or 0
+  local name = vim.api.nvim_buf_get_name(bufnr)
+  if name == "" then return vim.loop.cwd() end
+  
+  local found = vim.fs.find(ROOT_MARKERS, {
+    path = vim.fs.dirname(name),
+    upward = true,
+    stop = vim.loop.os_homedir(),
+  })[1]
+  
+  return found and vim.fs.dirname(found) or vim.loop.cwd()
 end
 
--- ===============================
--- Capabilities
--- ===============================
-local capabilities = require("cmp_nvim_lsp").default_capabilities()
-capabilities.textDocument.completion.completionItem.snippetSupport = true
+-- =========================================================
+-- Minimal LSP capabilities
+-- =========================================================
 
--- ===============================
--- Floating highlights
--- ===============================
-local function set_float_hl()
-	-- Slightly darker than Gruvbox Dark background
-	local bg_color = "#1B1B1B"
+local capabilities = vim.tbl_deep_extend("force", 
+  vim.lsp.protocol.make_client_capabilities(),
+  require("cmp_nvim_lsp").default_capabilities()
+)
 
-	-- Gruvbox standard foregrounds
-	local fg_default = "#EBDBB2" -- default text
-	local fg_blue = "#83A598" -- for FloatBorder accent
-	local fg_yellow = "#FABD2F" -- for focused border / highlights
+-- =========================================================
+-- Fast floating window (no effects)
+-- =========================================================
 
-	-- Floating window background and text
-	vim.api.nvim_set_hl(0, "NormalFloat", { bg = bg_color, fg = fg_default })
-
-	-- Borders
-	vim.api.nvim_set_hl(0, "FloatBorder", { fg = fg_blue, bg = bg_color, bold = true })
-	vim.api.nvim_set_hl(0, "LspFloatBorderFocused", { fg = fg_yellow, bg = bg_color, bold = true })
-end
-set_float_hl()
-vim.api.nvim_create_autocmd("ColorScheme", { pattern = "*", callback = set_float_hl })
-
--- ===============================
--- Fade-in effect
--- ===============================
-local fade_steps, fade_delay = 5, 10
-local function fade_in(winnr)
-	for i = 0, fade_steps do
-		vim.defer_fn(function()
-			if vim.api.nvim_win_is_valid(winnr) then
-				vim.api.nvim_win_set_option(winnr, "winblend", math.floor(100 - (i / fade_steps) * 100))
-			end
-		end, i * fade_delay)
-	end
+local function open_float(contents, filetype)
+  local bufnr, win = vim.lsp.util.open_floating_preview(
+    contents,
+    filetype,
+    {
+      border = "single",
+      focusable = false,
+      max_width = 80,
+      max_height = 15,
+      close_events = { "CursorMoved", "CursorMovedI", "InsertEnter" },
+    }
+  )
+  
+  if win and vim.api.nvim_win_is_valid(win) then
+    vim.api.nvim_win_set_option(win, "winhl", "Normal:NormalFloat,FloatBorder:FloatBorder")
+  end
+  
+  return bufnr, win
 end
 
--- ===============================
--- Floating preview
--- ===============================
-local function float_preview(contents, filetype, opts)
-	opts = opts or {}
-	opts.border = opts.border or "rounded"
-	local bufnr, winnr = vim.lsp.util.open_floating_preview(contents, filetype, opts)
-	if winnr and vim.api.nvim_win_is_valid(winnr) then
-		vim.api.nvim_win_set_option(winnr, "winhl", "Normal:NormalFloat,FloatBorder:FloatBorder")
-		vim.api.nvim_win_set_option(winnr, "winblend", 0)
-		fade_in(winnr)
-	end
-	return bufnr, winnr
+-- =========================================================
+-- Fast hover & signature (simplified, no timer issues)
+-- =========================================================
+
+local hover_win = nil
+local hover_pending = false
+
+local function hover()
+  -- Close existing hover window
+  if hover_win and vim.api.nvim_win_is_valid(hover_win) then
+    vim.api.nvim_win_close(hover_win, true)
+    hover_win = nil
+  end
+  
+  -- Prevent multiple simultaneous requests
+  if hover_pending then return end
+  hover_pending = true
+  
+  local params = vim.lsp.util.make_position_params()
+  vim.lsp.buf_request(0, "textDocument/hover", params, function(_, result)
+    hover_pending = false
+    if not result or not result.contents then return end
+    
+    local lines = vim.lsp.util.convert_input_to_markdown_lines(result.contents)
+    if #lines == 0 then return end
+
+    -- Limit hover size for speed and readability
+    if #lines > 30 then
+      local new_lines = {}
+      for i = 1, 30 do
+        new_lines[i] = lines[i]
+      end
+      new_lines[#new_lines + 1] = ""
+      new_lines[#new_lines + 1] = "..." -- truncated
+      lines = new_lines
+    end
+    
+    local bufnr, win = open_float(lines, "markdown")
+    hover_win = win
+    
+    -- Auto-close on cursor move
+    vim.api.nvim_create_autocmd({ "CursorMoved", "CursorMovedI", "InsertEnter" }, {
+      once = true,
+      callback = function()
+        if hover_win and vim.api.nvim_win_is_valid(hover_win) then
+          vim.api.nvim_win_close(hover_win, true)
+          hover_win = nil
+        end
+      end
+    })
+  end)
 end
 
--- ===============================
--- Hover & Signature Caches
--- ===============================
-local hover_cache = {}
-local signature_cache = {}
+local function signature()
+  local params = vim.lsp.util.make_position_params()
+  vim.lsp.buf_request(0, "textDocument/signatureHelp", params, function(_, result)
+    if not result or not result.signatures or #result.signatures == 0 then return end
+    
+    local lines = vim.lsp.util.convert_signature_help_to_markdown_lines(result)
+    if #lines == 0 then return end
 
-local function float_preview(contents, filetype, opts)
-	opts = opts or {}
-	opts.border = opts.border or "rounded"
-	local bufnr, winnr = vim.lsp.util.open_floating_preview(contents, filetype, opts)
-	if winnr and vim.api.nvim_win_is_valid(winnr) then
-		vim.api.nvim_win_set_option(winnr, "winhl", "Normal:NormalFloat,FloatBorder:FloatBorder")
-		vim.api.nvim_win_set_option(winnr, "winblend", 0)
-		-- Fade-in effect
-		local fade_steps, fade_delay = 5, 10
-		for i = 0, fade_steps do
-			vim.defer_fn(function()
-				if vim.api.nvim_win_is_valid(winnr) then
-					vim.api.nvim_win_set_option(winnr, "winblend", math.floor(100 - (i / fade_steps) * 100))
-				end
-			end, i * fade_delay)
-		end
-	end
-	return bufnr, winnr
+    -- Limit signature help size for speed and readability
+    if #lines > 30 then
+      local new_lines = {}
+      for i = 1, 30 do
+        new_lines[i] = lines[i]
+      end
+      new_lines[#new_lines + 1] = ""
+      new_lines[#new_lines + 1] = "..." -- truncated
+      lines = new_lines
+    end
+    
+    open_float(lines, "markdown")
+  end)
 end
 
-local function hover_with_cache()
-	local pos = vim.api.nvim_win_get_cursor(0)
-	local key = vim.fn.expand("%:p") .. ":" .. pos[1] .. ":" .. pos[2]
+-- =========================================================
+-- Efficient diagnostics
+-- =========================================================
 
-	if hover_cache[key] then
-		float_preview(hover_cache[key], "markdown", { max_width = 80 })
-		return
-	end
+-- Show source and code when available for more informative messages
+local function diagnostic_format(diagnostic)
+  local code = diagnostic.code
+  if not code and diagnostic.user_data and diagnostic.user_data.lsp then
+    code = diagnostic.user_data.lsp.code
+  end
 
-	local clients = vim.lsp.get_clients({ bufnr = 0 })
-	if #clients == 0 then
-		return
-	end
+  local source = diagnostic.source
 
-	local params = vim.lsp.util.make_position_params()
-	vim.lsp.buf_request(0, "textDocument/hover", params, function(err, result)
-		if err or not result or not result.contents then
-			return
-		end
-		local lines = vim.lsp.util.convert_input_to_markdown_lines(result.contents)
-		lines = vim.tbl_filter(function(l)
-			return l and l ~= ""
-		end, lines)
-		if vim.tbl_isempty(lines) then
-			return
-		end
+  if code and source then
+    return string.format("%s [%s:%s]", diagnostic.message, source, tostring(code))
+  elseif code then
+    return string.format("%s [%s]", diagnostic.message, tostring(code))
+  elseif source then
+    return string.format("%s [%s]", diagnostic.message, source)
+  end
 
-		hover_cache[key] = lines
-		vim.schedule(function()
-			float_preview(lines, "markdown", { max_width = 80 })
-		end)
-	end)
+  return diagnostic.message
 end
 
-local function signature_with_cache()
-	local pos = vim.api.nvim_win_get_cursor(0)
-	local key = vim.fn.expand("%:p") .. ":" .. pos[1] .. ":" .. pos[2]
-
-	if signature_cache[key] then
-		float_preview(signature_cache[key], "markdown", { max_width = 80 })
-		return
-	end
-
-	local clients = vim.lsp.get_clients({ bufnr = 0 })
-	if #clients == 0 then
-		return
-	end
-
-	local params = vim.lsp.util.make_position_params()
-	vim.lsp.buf_request(0, "textDocument/signatureHelp", params, function(err, result)
-		if err or not result or not result.signatures then
-			return
-		end
-		local lines = vim.lsp.util.convert_signature_help_to_markdown_lines(result)
-		lines = vim.tbl_filter(function(l)
-			return l and l ~= ""
-		end, lines)
-		if vim.tbl_isempty(lines) then
-			return
-		end
-
-		signature_cache[key] = lines
-		vim.schedule(function()
-			float_preview(lines, "markdown", { max_width = 80 })
-		end)
-	end)
-end
-
--- Clear cache on buffer changes
-vim.api.nvim_create_autocmd({ "TextChanged", "TextChangedI" }, {
-	pattern = "*",
-	callback = function()
-		local file = vim.fn.expand("%:p")
-		for k in pairs(hover_cache) do
-			if k:match("^" .. file) then
-				hover_cache[k] = nil
-			end
-		end
-		for k in pairs(signature_cache) do
-			if k:match("^" .. file) then
-				signature_cache[k] = nil
-			end
-		end
-	end,
+vim.diagnostic.config({
+  virtual_text = {
+    prefix = "●",
+    spacing = 2,
+  },
+  signs = false, -- Remove signs for speed
+  underline = true,
+  update_in_insert = false,
+  severity_sort = true,
+  float = {
+    border = "single",
+    source = "if_many",
+    focusable = false,
+    max_width = 80,
+    format = diagnostic_format,
+  },
 })
 
--- ===============================
--- on_attach
--- ===============================
+-- =========================================================
+-- Clean on_attach (no tracking overhead)
+-- =========================================================
+
 local function on_attach(client, bufnr)
-	-- Disable formatting for specific servers
-	if client.name == "tsserver" or client.name == "volar" or client.name == "ts_ls" or client.name == "vue_ls" then
-		client.server_capabilities.documentFormattingProvider = false
-	end
-
-	local map = function(keys, func, desc)
-		vim.keymap.set("n", keys, func, { buffer = bufnr, desc = desc })
-	end
-
-	map("K", hover_with_cache, "Hover Documentation (cached)")
-	map("<C-k>", signature_with_cache, "Signature Help (cached)")
-
-	-- Override diagnostics float to include fade-in
-	local orig_open_float = vim.diagnostic.open_float
-	vim.diagnostic.open_float = function(...)
-		local bufnr, winnr = orig_open_float(...)
-		if winnr and vim.api.nvim_win_is_valid(winnr) then
-			local fade_steps, fade_delay = 5, 10
-			for i = 0, fade_steps do
-				vim.defer_fn(function()
-					if vim.api.nvim_win_is_valid(winnr) then
-						vim.api.nvim_win_set_option(winnr, "winblend", math.floor(100 - (i / fade_steps) * 100))
-					end
-				end, i * fade_delay)
-			end
-		end
-		return bufnr, winnr
-	end
-
-	vim.diagnostic.config({
-		virtual_text = true,
-		signs = true,
-		underline = true,
-		update_in_insert = false,
-		float = { border = "rounded", source = "always", focusable = false },
-	})
-
-	map("<leader>ca", vim.lsp.buf.code_action, "Code Actions")
-	map("<leader>rn", vim.lsp.buf.rename, "Rename Symbol")
-	map("<leader>gl", vim.diagnostic.open_float, "Show Diagnostics")
-	map("<leader>gn", vim.diagnostic.goto_next, "Next Diagnostic")
-	map("<leader>gp", vim.diagnostic.goto_prev, "Previous Diagnostic")
-	map("gd", vim.lsp.buf.definition, "Go to Definition")
-	map("gD", vim.lsp.buf.declaration, "Go to Declaration")
-	map("gr", vim.lsp.buf.references, "References")
-	map("gi", vim.lsp.buf.implementation, "Implementation")
-	map("<leader>gf", function()
-		vim.lsp.buf.format({ async = true })
-	end, "Format Buffer")
+  -- Disable formatting for specific servers
+  local formatting_servers = {
+    tsserver = true,
+    ts_ls = true,
+    vue_ls = true,
+    volar = true,
+    eslint = true,
+  }
+  
+  if formatting_servers[client.name] then
+    client.server_capabilities.documentFormattingProvider = false
+  end
+  
+  -- Buffer-local keymaps
+  local keymap_opts = { buffer = bufnr }
+  vim.keymap.set("n", "K", hover, vim.tbl_extend("keep", { desc = "Hover" }, keymap_opts))
+  vim.keymap.set("i", "<C-k>", signature, vim.tbl_extend("keep", { desc = "Signature" }, keymap_opts))
+  vim.keymap.set("n", "gd", vim.lsp.buf.definition, vim.tbl_extend("keep", { desc = "Definition" }, keymap_opts))
+  vim.keymap.set("n", "gD", vim.lsp.buf.declaration, vim.tbl_extend("keep", { desc = "Declaration" }, keymap_opts))
+  vim.keymap.set("n", "gi", vim.lsp.buf.implementation, vim.tbl_extend("keep", { desc = "Implementation" }, keymap_opts))
+  vim.keymap.set("n", "gr", vim.lsp.buf.references, vim.tbl_extend("keep", { desc = "References" }, keymap_opts))
+	vim.keymap.set("v","<leader>gf", vim.lsp.buf.format, vim.tbl_extend("keep", { desc = "Format" }, keymap_opts))
+	vim.keymap.set("n", "<leader>gf", vim.lsp.buf.format, vim.tbl_extend("keep", { desc = "Format" }, keymap_opts))
+	vim.keymap.set("n", "<leader>ca", vim.lsp.buf.code_action, vim.tbl_extend("keep", { desc = "Code Action" }, keymap_opts))
+  vim.keymap.set("n", "<leader>r", vim.lsp.buf.rename, vim.tbl_extend("keep", { desc = "Rename" }, keymap_opts))
+  vim.keymap.set("n", "<leader>e", vim.diagnostic.open_float, vim.tbl_extend("keep", { desc = "Diagnostics" }, keymap_opts))
+  vim.keymap.set("n", "<leader>f", function()
+    vim.lsp.buf.format({ async = true, timeout_ms = 5000 })
+  end, vim.tbl_extend("keep", { desc = "Format" }, keymap_opts))
 end
 
--- ===============================
--- Plugin configurations
--- ===============================
+-- =========================================================
+-- Optimized LSP setup
+-- =========================================================
+
 return {
-	-- Rust tools
-	-- {
-	-- 	"simrat39/rust-tools.nvim",
-	-- 	ft = "rust",
-	-- 	config = function()
-	-- 		require("rust-tools").setup({
-	-- 			server = { on_attach = on_attach, capabilities = capabilities, root_dir = get_project_root },
-	-- 		})
-	-- 	end,
-	-- },
-
-	-- Mason
-	{ "williamboman/mason.nvim", cmd = "Mason", config = true },
-
-	-- Mason LSP
-	{
-		"williamboman/mason-lspconfig.nvim",
-		event = "BufReadPre",
-		config = function()
-			require("mason-lspconfig").setup({
-				ensure_installed = {
-					"lua_ls",
-					"rust_analyzer",
-					"clangd",
-					"cmake",
-					"pylsp",
-					"gopls",
-					"pbls",
-					"intelephense",
-					"ts_ls",
-					"vue_ls",
-					"html",
-					"cssls",
-				},
-			})
-		end,
-	},
-
-	-- LSP Config
-	{
-		"neovim/nvim-lspconfig",
-		event = { "BufReadPre", "BufNewFile" },
-		dependencies = { "hrsh7th/cmp-nvim-lsp" },
-		config = function()
-			local lspconfig = require("lspconfig")
-			local vue_typescript_plugin_path = vim.fn.stdpath("data")
-				.. "/mason/packages/vue-language-server/node_modules/@vue/language-server/node_modules/@vue/typescript-plugin"
-
-			lspconfig.ts_ls.setup({
-				on_attach = on_attach,
-				capabilities = capabilities,
-				root_dir = get_project_root,
-				init_options = {
-					plugins = {
-						{
-							name = "@vue/typescript-plugin",
-							location = vue_typescript_plugin_path,
-							languages = { "vue" },
-						},
-					},
-				},
-				filetypes = { "typescript", "javascript", "javascriptreact", "typescriptreact", "vue" },
-				single_file_support = false,
-			})
-
-			lspconfig.vue_ls.setup({ on_attach = on_attach, capabilities = capabilities, root_dir = get_project_root })
-
-			lspconfig.html.setup({ on_attach = on_attach, capabilities = capabilities, root_dir = get_project_root })
-			lspconfig.cssls.setup({ on_attach = on_attach, capabilities = capabilities, root_dir = get_project_root })
-			lspconfig.intelephense.setup({
-				on_attach = on_attach,
-				capabilities = capabilities,
-				root_dir = get_project_root,
-			})
-			lspconfig.lua_ls.setup({
-				on_attach = on_attach,
-				capabilities = capabilities,
-				root_dir = get_project_root,
-				settings = {
-					Lua = {
-						runtime = { version = "LuaJIT" },
-						diagnostics = { globals = { "vim" } },
-						workspace = { library = vim.api.nvim_get_runtime_file("", true) },
-					},
-				},
-			})
-			lspconfig.clangd.setup({
-				on_attach = on_attach,
-				capabilities = capabilities,
-				cmd = { "clangd", "--compile-commands-dir=" .. get_project_root() },
-				root_dir = get_project_root,
-			})
-			lspconfig.pylsp.setup({ on_attach = on_attach, capabilities = capabilities, root_dir = get_project_root })
-			lspconfig.gopls.setup({ on_attach = on_attach, capabilities = capabilities, root_dir = get_project_root })
-			lspconfig.pbls.setup({ on_attach = on_attach, capabilities = capabilities, root_dir = get_project_root })
-			lspconfig.cmake.setup({ on_attach = on_attach, capabilities = capabilities, root_dir = get_project_root })
-			lspconfig.rust_analyzer.setup({
-				on_attach = on_attach,
-				capabilities = capabilities,
-				root_dir = get_project_root,
-			})
-		end,
-	},
-
-	-- null-ls
-	{
-		"nvimtools/none-ls.nvim",
-		dependencies = { "williamboman/mason.nvim", "jay-babu/mason-null-ls.nvim" },
-		event = { "BufReadPre", "BufNewFile" },
-		config = function()
-			local null_ls = require("null-ls")
-			local mason_null_ls = require("mason-null-ls")
-			local tools = {
-				"stylua",
-				"black",
-				"isort",
-				"clang_format",
-				"gofmt",
-				"goimports",
-				"ruff",
-				"eslint_d",
-				"prettier",
-				"jsonlint",
-			}
-			local sources = {
-				null_ls.builtins.formatting.stylua,
-				null_ls.builtins.formatting.black,
-				null_ls.builtins.formatting.isort,
-				null_ls.builtins.formatting.clang_format,
-				null_ls.builtins.formatting.gofmt,
-				null_ls.builtins.formatting.goimports,
-				null_ls.builtins.formatting.prettier,
-				null_ls.builtins.diagnostics.eslint_d,
-			}
-			null_ls.setup({ sources = sources, on_attach = on_attach, diagnostics_format = "[null-ls] #{m} (#{s})" })
-			mason_null_ls.setup({ ensure_installed = tools, automatic_installation = true })
-		end,
-	},
+  {
+    "williamboman/mason.nvim",
+    cmd = "Mason",
+    opts = {
+      ui = { border = "single" },
+      max_concurrent_installers = 4,
+    },
+  },
+  
+  {
+    "williamboman/mason-lspconfig.nvim",
+    event = "VeryLazy",
+    opts = {
+      ensure_installed = {
+        "lua_ls",
+        "rust_analyzer",
+        "clangd",
+        "pyright",  -- Faster than pylsp
+        "gopls",
+        "ts_ls",
+        "html",
+        "cssls",
+      },
+      automatic_installation = true,
+      handlers = {}, -- disable automatic lspconfig.setup; we configure servers manually below
+    },
+  },
+  
+  {
+    "neovim/nvim-lspconfig",
+    ft = {
+      "lua",
+      "python",
+      "go",
+      "c",
+      "cpp",
+      "rust",
+      "html",
+      "css",
+      "javascript",
+      "typescript",
+      "typescriptreact",
+      "javascriptreact",
+      "vue",
+      "cmake",
+    },
+    config = function()
+      local lspconfig = require("lspconfig")
+      
+      local common = {
+        on_attach = on_attach,
+        capabilities = capabilities,
+        flags = {
+          debounce_text_changes = 150,
+        },
+        root_dir = function(fname)
+          return get_project_root(vim.fn.bufnr(fname))
+        end,
+      }
+      
+      -- Lua
+      lspconfig.lua_ls.setup(vim.tbl_deep_extend("force", common, {
+        settings = {
+          Lua = {
+            runtime = { version = "LuaJIT" },
+            diagnostics = { globals = { "vim" } },
+            workspace = {
+              library = vim.api.nvim_get_runtime_file("", true),
+              checkThirdParty = false,
+            },
+            telemetry = { enable = false },
+          },
+        },
+      }))
+      
+      -- TypeScript/JavaScript
+      lspconfig.ts_ls.setup(vim.tbl_deep_extend("force", common, {
+        init_options = {
+          preferences = {
+            includeCompletionsForImportStatements = true,
+            includeCompletionsForModuleExports = false,
+            includeAutomaticOptionalChainCompletions = true,
+          },
+        },
+        settings = {
+          typescript = {},
+          javascript = {},
+        },
+      }))
+      
+      -- Python (using pyright for speed, but still informative)
+      lspconfig.pyright.setup(vim.tbl_deep_extend("force", common, {
+        settings = {
+          python = {
+            analysis = {
+              autoSearchPaths = true,
+              useLibraryCodeForTypes = true,
+              diagnosticMode = "openFilesOnly", -- only open files for speed
+              typeCheckingMode = "basic",        -- some type checking for better hints
+              autoImportCompletions = true,       -- suggest imports in completion
+            },
+          },
+        },
+      }))
+      
+      -- Go
+      lspconfig.gopls.setup(vim.tbl_deep_extend("force", common, {
+        settings = {
+          gopls = {
+            usePlaceholders = true,
+          },
+        },
+      }))
+      
+      -- C/C++
+      -- Keep detailed completions, but drop clang-tidy (heavy) for faster feedback.
+      -- If you want extra static analysis, you can add "--clang-tidy" back.
+      lspconfig.clangd.setup(vim.tbl_deep_extend("force", common, {
+        cmd = {
+          "clangd",
+          "--background-index",
+          "--header-insertion=iwyu",
+          "--completion-style=detailed",
+          "--function-arg-placeholders",
+          "--fallback-style=llvm",
+        },
+      }))
+      
+      -- Rust
+      -- More informative (inlay hints + clippy) but tuned for decent performance.
+      lspconfig.rust_analyzer.setup(vim.tbl_deep_extend("force", common, {
+        settings = {
+          ["rust-analyzer"] = {
+            checkOnSave = {
+              command = "clippy", -- rich diagnostics on save
+            },
+            cargo = {
+              allFeatures = false,               -- avoid building all features by default
+              buildScripts = { enable = false }, -- speed up by skipping build scripts
+            },
+          },
+        },
+      }))
+      
+      -- Web
+      lspconfig.html.setup(common)
+      lspconfig.cssls.setup(common)
+      
+      -- CMake
+      lspconfig.cmake.setup(common)
+    end,
+  },
 }

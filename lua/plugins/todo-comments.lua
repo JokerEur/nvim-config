@@ -3,6 +3,7 @@ return {
 	config = function()
 		require('todo-comments').setup({
 			-- Show icons in the signs column
+
 			signs = true,
 
 			-- Sign priority determines where the sign appears in the sign column relative to other signs

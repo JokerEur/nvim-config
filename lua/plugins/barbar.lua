@@ -1,66 +1,115 @@
 return {
   'romgrk/barbar.nvim',
   dependencies = {
-    'nvim-tree/nvim-web-devicons',  -- Optional for file icons
-    'lewis6991/gitsigns.nvim',      -- Optional for git status
+    'nvim-tree/nvim-web-devicons',
+    'lewis6991/gitsigns.nvim',
   },
-  config = function()
-    -- Disable auto setup for custom configuration
+  init = function()
+    -- Prevent barbar from doing its own auto-setup (we configure it manually)
     vim.g.barbar_auto_setup = false
+    -- Set background early to prevent flash
+    vim.opt.background = "dark"
+  end,
+  config = function()
+    -- Enable tabline
+    vim.opt.showtabline = 2
 
-    -- Ensure Gruvbox is loaded first
-    vim.cmd.colorscheme("gruvbox")
+    -- Configure Barbar
+    require('barbar').setup({
+      -- Performance-oriented behavior
+      animation = false,             -- disable tab animations for faster redraws
+      auto_hide = false,             -- always show tabline so buffers are visible
+      tabpages = false,              -- skip tabpage indicator to reduce clutter
+      clickable = true,
 
-    -- Custom Gruvbox-themed highlights
-    vim.api.nvim_set_hl(0, "BufferCurrent",      { bg = "#504945", fg = "#ebdbb2", bold = true }) -- Active buffer
-    vim.api.nvim_set_hl(0, "BufferCurrentMod",   { bg = "#504945", fg = "#fabd2f", bold = true }) -- Modified active buffer
-    vim.api.nvim_set_hl(0, "BufferInactive",     { bg = "#3c3836", fg = "#928374" }) -- Inactive buffers
-    vim.api.nvim_set_hl(0, "BufferInactiveMod",  { bg = "#3c3836", fg = "#d79921" }) -- Modified inactive buffer
-    vim.api.nvim_set_hl(0, "BufferVisible",      { bg = "#282828", fg = "#ebdbb2" }) -- Visible but not focused buffer
-    vim.api.nvim_set_hl(0, "BufferVisibleMod",   { bg = "#282828", fg = "#fabd2f" }) -- Visible modified buffer
-    vim.api.nvim_set_hl(0, "BufferTabpages",     { bg = "#282828", fg = "#fe8019", bold = true }) -- Tab pages indicator
+      -- Show inactive buffers so multiple tabs are visible
+      hide = {
+        inactive = false,
+      },
+      -- Icons and styling
+      icons = {
+        buffer_index = false,
+        buffer_number = true,        -- show :bnumber for quick jumps
+        button = '',
+        inactive = { separator = { left = '▎', right = '' } },
+        current = { separator = { left = '▎', right = '' } },
+        pinned = { button = '車', filename = true, separator = { right = '' } },
 
-    -- Enable default behavior
-    vim.cmd [[
-      set showtabline=2
-    ]]
+        -- Diagnostics per buffer (more informative for dev work)
+        diagnostics = {
+          [vim.diagnostic.severity.ERROR] = { enabled = true,  icon = ' ' },
+          [vim.diagnostic.severity.WARN]  = { enabled = true,  icon = ' ' },
+          [vim.diagnostic.severity.INFO]  = { enabled = false },
+          [vim.diagnostic.severity.HINT]  = { enabled = false },
+        },
 
-    -- Optional: Setup file icons (using nvim-web-devicons)
-    local devicons_ok, devicons = pcall(require, 'nvim-web-devicons')
-    if devicons_ok then
-      devicons.setup()
-    end
+        -- Pretty separators
+        separator = { left = '▎', right = '' },
+        modified = { button = '●' },
 
-    -- Optional: Setup git status indicators (using gitsigns)
-    local gitsigns_ok, gitsigns = pcall(require, 'gitsigns')
-    if gitsigns_ok then
-      gitsigns.setup({
-        signs = {
-          add = { text = '│' },
-          change = { text = '│' },
-          delete = { text = '' },
-        }
-      })
-    end
+        -- Filetype icons
+        filetype = {
+          enabled = true,
+          custom_colors = false,
+        },
 
-    -- Basic keybindings for buffer navigation
-    local map = vim.api.nvim_set_keymap
+        -- Git status indicators
+        gitsigns = {
+          added = { enabled = true,  icon = '+' },
+          changed = { enabled = true,  icon = '~' },
+          deleted = { enabled = true,  icon = '-' },
+        },
+      },
+
+      -- Visual styling
+      highlight_visible = true,
+      highlight_inactive_file_icons = false,
+
+      -- Sidebar integration
+      sidebar_filetypes = {
+        NvimTree = true,
+        outline = true,
+      },
+
+      -- Length & padding
+      maximum_length = 30,
+      minimum_padding = 1,
+      maximum_padding = 3,
+
+      -- Label for unnamed buffers (more informative than just "[No Name]")
+      no_name_title = "[Scratch]",
+    })
+
+    -- Enhanced keybindings with better ergonomics
+    local map = vim.keymap.set
     local opts = { noremap = true, silent = true }
 
+    -- Buffer navigation
     map('n', '<A-,>', '<Cmd>BufferPrevious<CR>', opts)
     map('n', '<A-.>', '<Cmd>BufferNext<CR>', opts)
-    map('n', '<A-1>', '<Cmd>BufferGoto 1<CR>', opts)
-    map('n', '<A-2>', '<Cmd>BufferGoto 2<CR>', opts)
-    map('n', '<A-3>', '<Cmd>BufferGoto 3<CR>', opts)
-    map('n', '<A-4>', '<Cmd>BufferGoto 4<CR>', opts)
-    map('n', '<A-5>', '<Cmd>BufferGoto 5<CR>', opts)
-    map('n', '<A-6>', '<Cmd>BufferGoto 6<CR>', opts)
-    map('n', '<A-7>', '<Cmd>BufferGoto 7<CR>', opts)
-    map('n', '<A-8>', '<Cmd>BufferGoto 8<CR>', opts)
-    map('n', '<A-9>', '<Cmd>BufferGoto 9<CR>', opts)
+    
+    -- Quick buffer switching (Alt+Number)
+    for i = 1, 9 do
+      map('n', '<A-'..i..'>', '<Cmd>BufferGoto '..i..'<CR>', opts)
+    end
     map('n', '<A-0>', '<Cmd>BufferLast<CR>', opts)
+
+    -- Buffer management
     map('n', '<A-p>', '<Cmd>BufferPin<CR>', opts)
     map('n', '<A-c>', '<Cmd>BufferClose<CR>', opts)
-  end
-}
+    map('n', '<A-x>', '<Cmd>BufferClose!<CR>', opts) -- Force close
+    
+    -- Buffer ordering
+    map('n', '<A-<>', '<Cmd>BufferMovePrevious<CR>', opts)
+    map('n', '<A->>', '<Cmd>BufferMoveNext<CR>', opts)
 
+    -- Pick buffers visually
+    map('n', '<A-b>', '<Cmd>BufferPick<CR>', opts)
+
+    -- Close all but current/pinned
+    map('n', '<A-C-a>', '<Cmd>BufferCloseAllButCurrentOrPinned<CR>', opts)
+  end,
+  
+  -- Lazy loading optimization: only load barbar when we actually enter a buffer
+  event = { "BufReadPre", "BufNewFile" },
+}
