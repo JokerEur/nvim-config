@@ -153,45 +153,81 @@ return {
 			update_in_insert = false,
 		})
 
-		-- LSP & formatters display - Optimized
-		ins_left({
-			function()
-				local buf_ft = vim.bo.filetype
-				local clients = vim.lsp.get_clients({ bufnr = 0 })
-				if not clients or vim.tbl_isempty(clients) then
-					return ""
-				end
+		-- LSP display (cached): statusline re-renders a lot; keep this O(1) per redraw.
+		local lsp_cache = {}
+		local function compute_lsp_segment(bufnr)
+			local clients = vim.lsp.get_clients({ bufnr = bufnr })
+			if not clients or vim.tbl_isempty(clients) then
+				return ""
+			end
 
-				local client_names = {}
-				for _, client in ipairs(clients) do
-					if client.name ~= "null-ls" then
-						table.insert(client_names, client.name)
-					end
+			local client_names = {}
+			for _, client in ipairs(clients) do
+				if client.name ~= "null-ls" then
+					client_names[#client_names + 1] = client.name
 				end
+			end
 
-				-- Check for null-ls formatters
-				local formatters = {}
-				local ok, null_ls = pcall(require, "null-ls")
-				if ok and null_ls then
-					local sources = null_ls.get_sources()
-					for _, source in ipairs(sources) do
-						if source.filetypes and vim.tbl_contains(source.filetypes, buf_ft) then
-							if source.method == null_ls.methods.FORMATTING then
-								table.insert(formatters, source.name)
-							end
+			if #client_names == 0 then
+				return ""
+			end
+
+			-- Optional: show null-ls formatters *only if null-ls is already loaded*.
+			local formatters = {}
+			local null_ls = package.loaded["null-ls"]
+			if null_ls and null_ls.get_sources and null_ls.methods then
+				local buf_ft = vim.bo[bufnr].filetype
+				for _, source in ipairs(null_ls.get_sources() or {}) do
+					if source.filetypes and vim.tbl_contains(source.filetypes, buf_ft) then
+						if source.method == null_ls.methods.FORMATTING then
+							formatters[#formatters + 1] = source.name
 						end
 					end
 				end
+			end
 
-				local parts = {}
-				if #client_names > 0 then
-					table.insert(parts, " " .. table.concat(client_names, ", "))
-				end
-				if #formatters > 0 then
-					table.insert(parts, " " .. table.concat(formatters, ", "))
-				end
+			local parts = { " " .. table.concat(client_names, ", ") }
+			if #formatters > 0 then
+				parts[#parts + 1] = " " .. table.concat(formatters, ", ")
+			end
 
-				return #parts > 0 and table.concat(parts, " | ") or ""
+			return table.concat(parts, " | ")
+		end
+
+		local function update_lsp_cache(bufnr)
+			if not vim.api.nvim_buf_is_valid(bufnr) then
+				return
+			end
+			lsp_cache[bufnr] = compute_lsp_segment(bufnr)
+		end
+
+		vim.api.nvim_create_autocmd({ "LspAttach", "LspDetach" }, {
+			callback = function(args)
+				update_lsp_cache(args.buf)
+			end,
+		})
+
+		vim.api.nvim_create_autocmd({ "BufEnter", "BufFilePost", "FileType" }, {
+			callback = function(args)
+				update_lsp_cache(args.buf)
+			end,
+		})
+
+		vim.api.nvim_create_autocmd("BufWipeout", {
+			callback = function(args)
+				lsp_cache[args.buf] = nil
+			end,
+		})
+
+		ins_left({
+			function()
+				local bufnr = vim.api.nvim_get_current_buf()
+				local seg = lsp_cache[bufnr]
+				if seg == nil then
+					update_lsp_cache(bufnr)
+					seg = lsp_cache[bufnr]
+				end
+				return seg or ""
 			end,
 			color = { fg = colors.fg, gui = "italic" },
 			cond = conditions.hide_in_width,

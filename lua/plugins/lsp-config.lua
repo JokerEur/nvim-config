@@ -1,6 +1,6 @@
--- ========================================================-- =========================================================
--- Fast & deterministic project root detection
--- =========================================================
+-- LSP setup (optimized)
+-- NOTE: lazy.nvim evaluates all files under `lua/plugins/*` at startup to collect specs.
+-- Keep heavy work (vim.lsp, cmp_nvim_lsp, diagnostic config, etc.) inside plugin `config`.
 
 local ROOT_MARKERS = {
   ".git",
@@ -12,210 +12,20 @@ local ROOT_MARKERS = {
   "mix.exs",
 }
 
-local function get_project_root(bufnr)
-  bufnr = bufnr or 0
-  local name = vim.api.nvim_buf_get_name(bufnr)
-  if name == "" then return vim.loop.cwd() end
-  
+local function get_project_root(fname)
+  fname = fname or vim.api.nvim_buf_get_name(0)
+  if fname == "" then return vim.loop.cwd() end
+
+  local dir = vim.fs.dirname(fname)
   local found = vim.fs.find(ROOT_MARKERS, {
-    path = vim.fs.dirname(name),
+    path = dir,
     upward = true,
     stop = vim.loop.os_homedir(),
   })[1]
-  
-  return found and vim.fs.dirname(found) or vim.loop.cwd()
+
+  -- Fall back to the file's directory (better for single-file projects)
+  return found and vim.fs.dirname(found) or dir
 end
-
--- =========================================================
--- Minimal LSP capabilities
--- =========================================================
-
-local capabilities = vim.tbl_deep_extend("force", 
-  vim.lsp.protocol.make_client_capabilities(),
-  require("cmp_nvim_lsp").default_capabilities()
-)
-
--- =========================================================
--- Fast floating window (no effects)
--- =========================================================
-
-local function open_float(contents, filetype)
-  local bufnr, win = vim.lsp.util.open_floating_preview(
-    contents,
-    filetype,
-    {
-      border = "single",
-      focusable = false,
-      max_width = 80,
-      max_height = 15,
-      close_events = { "CursorMoved", "CursorMovedI", "InsertEnter" },
-    }
-  )
-  
-  if win and vim.api.nvim_win_is_valid(win) then
-    vim.api.nvim_win_set_option(win, "winhl", "Normal:NormalFloat,FloatBorder:FloatBorder")
-  end
-  
-  return bufnr, win
-end
-
--- =========================================================
--- Fast hover & signature (simplified, no timer issues)
--- =========================================================
-
-local hover_win = nil
-local hover_pending = false
-
-local function hover()
-  -- Close existing hover window
-  if hover_win and vim.api.nvim_win_is_valid(hover_win) then
-    vim.api.nvim_win_close(hover_win, true)
-    hover_win = nil
-  end
-  
-  -- Prevent multiple simultaneous requests
-  if hover_pending then return end
-  hover_pending = true
-  
-  local params = vim.lsp.util.make_position_params()
-  vim.lsp.buf_request(0, "textDocument/hover", params, function(_, result)
-    hover_pending = false
-    if not result or not result.contents then return end
-    
-    local lines = vim.lsp.util.convert_input_to_markdown_lines(result.contents)
-    if #lines == 0 then return end
-
-    -- Limit hover size for speed and readability
-    if #lines > 30 then
-      local new_lines = {}
-      for i = 1, 30 do
-        new_lines[i] = lines[i]
-      end
-      new_lines[#new_lines + 1] = ""
-      new_lines[#new_lines + 1] = "..." -- truncated
-      lines = new_lines
-    end
-    
-    local bufnr, win = open_float(lines, "markdown")
-    hover_win = win
-    
-    -- Auto-close on cursor move
-    vim.api.nvim_create_autocmd({ "CursorMoved", "CursorMovedI", "InsertEnter" }, {
-      once = true,
-      callback = function()
-        if hover_win and vim.api.nvim_win_is_valid(hover_win) then
-          vim.api.nvim_win_close(hover_win, true)
-          hover_win = nil
-        end
-      end
-    })
-  end)
-end
-
-local function signature()
-  local params = vim.lsp.util.make_position_params()
-  vim.lsp.buf_request(0, "textDocument/signatureHelp", params, function(_, result)
-    if not result or not result.signatures or #result.signatures == 0 then return end
-    
-    local lines = vim.lsp.util.convert_signature_help_to_markdown_lines(result)
-    if #lines == 0 then return end
-
-    -- Limit signature help size for speed and readability
-    if #lines > 30 then
-      local new_lines = {}
-      for i = 1, 30 do
-        new_lines[i] = lines[i]
-      end
-      new_lines[#new_lines + 1] = ""
-      new_lines[#new_lines + 1] = "..." -- truncated
-      lines = new_lines
-    end
-    
-    open_float(lines, "markdown")
-  end)
-end
-
--- =========================================================
--- Efficient diagnostics
--- =========================================================
-
--- Show source and code when available for more informative messages
-local function diagnostic_format(diagnostic)
-  local code = diagnostic.code
-  if not code and diagnostic.user_data and diagnostic.user_data.lsp then
-    code = diagnostic.user_data.lsp.code
-  end
-
-  local source = diagnostic.source
-
-  if code and source then
-    return string.format("%s [%s:%s]", diagnostic.message, source, tostring(code))
-  elseif code then
-    return string.format("%s [%s]", diagnostic.message, tostring(code))
-  elseif source then
-    return string.format("%s [%s]", diagnostic.message, source)
-  end
-
-  return diagnostic.message
-end
-
-vim.diagnostic.config({
-  virtual_text = {
-    prefix = "●",
-    spacing = 2,
-  },
-  signs = false, -- Remove signs for speed
-  underline = true,
-  update_in_insert = false,
-  severity_sort = true,
-  float = {
-    border = "single",
-    source = "if_many",
-    focusable = false,
-    max_width = 80,
-    format = diagnostic_format,
-  },
-})
-
--- =========================================================
--- Clean on_attach (no tracking overhead)
--- =========================================================
-
-local function on_attach(client, bufnr)
-  -- Disable formatting for specific servers
-  local formatting_servers = {
-    tsserver = true,
-    ts_ls = true,
-    vue_ls = true,
-    volar = true,
-    eslint = true,
-  }
-  
-  if formatting_servers[client.name] then
-    client.server_capabilities.documentFormattingProvider = false
-  end
-  
-  -- Buffer-local keymaps
-  local keymap_opts = { buffer = bufnr }
-  vim.keymap.set("n", "K", hover, vim.tbl_extend("keep", { desc = "Hover" }, keymap_opts))
-  vim.keymap.set("i", "<C-k>", signature, vim.tbl_extend("keep", { desc = "Signature" }, keymap_opts))
-  vim.keymap.set("n", "gd", vim.lsp.buf.definition, vim.tbl_extend("keep", { desc = "Definition" }, keymap_opts))
-  vim.keymap.set("n", "gD", vim.lsp.buf.declaration, vim.tbl_extend("keep", { desc = "Declaration" }, keymap_opts))
-  vim.keymap.set("n", "gi", vim.lsp.buf.implementation, vim.tbl_extend("keep", { desc = "Implementation" }, keymap_opts))
-  vim.keymap.set("n", "gr", vim.lsp.buf.references, vim.tbl_extend("keep", { desc = "References" }, keymap_opts))
-	vim.keymap.set("v","<leader>gf", vim.lsp.buf.format, vim.tbl_extend("keep", { desc = "Format" }, keymap_opts))
-	vim.keymap.set("n", "<leader>gf", vim.lsp.buf.format, vim.tbl_extend("keep", { desc = "Format" }, keymap_opts))
-	vim.keymap.set("n", "<leader>ca", vim.lsp.buf.code_action, vim.tbl_extend("keep", { desc = "Code Action" }, keymap_opts))
-  vim.keymap.set("n", "<leader>r", vim.lsp.buf.rename, vim.tbl_extend("keep", { desc = "Rename" }, keymap_opts))
-  vim.keymap.set("n", "<leader>e", vim.diagnostic.open_float, vim.tbl_extend("keep", { desc = "Diagnostics" }, keymap_opts))
-  vim.keymap.set("n", "<leader>f", function()
-    vim.lsp.buf.format({ async = true, timeout_ms = 5000 })
-  end, vim.tbl_extend("keep", { desc = "Format" }, keymap_opts))
-end
-
--- =========================================================
--- Optimized LSP setup
--- =========================================================
 
 return {
   {
@@ -226,7 +36,7 @@ return {
       max_concurrent_installers = 4,
     },
   },
-  
+
   {
     "williamboman/mason-lspconfig.nvim",
     event = "VeryLazy",
@@ -235,17 +45,17 @@ return {
         "lua_ls",
         "rust_analyzer",
         "clangd",
-        "pyright",  -- Faster than pylsp
+        "pyright", -- Faster than pylsp
         "gopls",
         "ts_ls",
         "html",
         "cssls",
       },
       automatic_installation = true,
-      handlers = {}, -- disable automatic lspconfig.setup; we configure servers manually below
+      handlers = {}, -- we configure servers manually below
     },
   },
-  
+
   {
     "neovim/nvim-lspconfig",
     ft = {
@@ -265,21 +75,206 @@ return {
       "cmake",
     },
     config = function()
-      local lspconfig = require("lspconfig")
-      
+      -- Use Neovim 0.11+ native API: vim.lsp.config + vim.lsp.enable
+      -- This avoids the deprecated nvim-lspconfig "framework" API.
+
+      -- =========================================================
+      -- Capabilities
+      -- =========================================================
+      local capabilities = vim.lsp.protocol.make_client_capabilities()
+      do
+        local ok, cmp_lsp = pcall(require, "cmp_nvim_lsp")
+        if ok and cmp_lsp and cmp_lsp.default_capabilities then
+          capabilities = vim.tbl_deep_extend("force", capabilities, cmp_lsp.default_capabilities())
+        end
+      end
+
+      -- =========================================================
+      -- Fast floating window helpers
+      -- =========================================================
+      local function open_float(contents, filetype)
+        local _, win = vim.lsp.util.open_floating_preview(contents, filetype, {
+          border = "single",
+          focusable = false,
+          max_width = 80,
+          max_height = 15,
+          close_events = { "CursorMoved", "CursorMovedI", "InsertEnter" },
+        })
+
+        if win and vim.api.nvim_win_is_valid(win) then
+          vim.api.nvim_win_set_option(win, "winhl", "Normal:NormalFloat,FloatBorder:FloatBorder")
+        end
+      end
+
+      local hover_win = nil
+      local hover_pending = false
+
+      local function hover()
+        if hover_win and vim.api.nvim_win_is_valid(hover_win) then
+          vim.api.nvim_win_close(hover_win, true)
+          hover_win = nil
+        end
+        if hover_pending then return end
+        hover_pending = true
+
+        local params = vim.lsp.util.make_position_params()
+        vim.lsp.buf_request(0, "textDocument/hover", params, function(_, result)
+          hover_pending = false
+          if not result or not result.contents then return end
+
+          local lines = vim.lsp.util.convert_input_to_markdown_lines(result.contents)
+          if #lines == 0 then return end
+
+          if #lines > 30 then
+            local new_lines = {}
+            for i = 1, 30 do
+              new_lines[i] = lines[i]
+            end
+            new_lines[#new_lines + 1] = ""
+            new_lines[#new_lines + 1] = "..." -- truncated
+            lines = new_lines
+          end
+
+          local _, win = vim.lsp.util.open_floating_preview(lines, "markdown", {
+            border = "single",
+            focusable = false,
+            max_width = 80,
+            max_height = 15,
+            close_events = { "CursorMoved", "CursorMovedI", "InsertEnter" },
+          })
+          hover_win = win
+
+          vim.api.nvim_create_autocmd({ "CursorMoved", "CursorMovedI", "InsertEnter" }, {
+            once = true,
+            callback = function()
+              if hover_win and vim.api.nvim_win_is_valid(hover_win) then
+                vim.api.nvim_win_close(hover_win, true)
+                hover_win = nil
+              end
+            end,
+          })
+        end)
+      end
+
+      local function signature()
+        local params = vim.lsp.util.make_position_params()
+        vim.lsp.buf_request(0, "textDocument/signatureHelp", params, function(_, result)
+          if not result or not result.signatures or #result.signatures == 0 then return end
+
+          local lines = vim.lsp.util.convert_signature_help_to_markdown_lines(result)
+          if #lines == 0 then return end
+
+          if #lines > 30 then
+            local new_lines = {}
+            for i = 1, 30 do
+              new_lines[i] = lines[i]
+            end
+            new_lines[#new_lines + 1] = ""
+            new_lines[#new_lines + 1] = "..." -- truncated
+            lines = new_lines
+          end
+
+          open_float(lines, "markdown")
+        end)
+      end
+
+      -- =========================================================
+      -- Diagnostics
+      -- =========================================================
+      local function diagnostic_format(diagnostic)
+        local code = diagnostic.code
+        if not code and diagnostic.user_data and diagnostic.user_data.lsp then
+          code = diagnostic.user_data.lsp.code
+        end
+
+        local source = diagnostic.source
+
+        if code and source then
+          return string.format("%s [%s:%s]", diagnostic.message, source, tostring(code))
+        elseif code then
+          return string.format("%s [%s]", diagnostic.message, tostring(code))
+        elseif source then
+          return string.format("%s [%s]", diagnostic.message, source)
+        end
+
+        return diagnostic.message
+      end
+
+      vim.diagnostic.config({
+        virtual_text = {
+          prefix = "●",
+          spacing = 2,
+        },
+        signs = false,
+        underline = true,
+        update_in_insert = false,
+        severity_sort = true,
+        float = {
+          border = "single",
+          source = "if_many",
+          focusable = false,
+          max_width = 80,
+          format = diagnostic_format,
+        },
+      })
+
+      -- =========================================================
+      -- LspAttach: keymaps and per-client tweaks (replacement for on_attach)
+      -- =========================================================
+      vim.api.nvim_create_autocmd("LspAttach", {
+        callback = function(args)
+          local client = vim.lsp.get_client_by_id(args.data.client_id)
+          if not client then return end
+
+          local formatting_servers = {
+            tsserver = true,
+            ts_ls = true,
+            vue_ls = true,
+            volar = true,
+            eslint = true,
+          }
+          if formatting_servers[client.name] then
+            client.server_capabilities.documentFormattingProvider = false
+          end
+
+          local bufnr = args.buf
+          local keymap_opts = { buffer = bufnr }
+          vim.keymap.set("n", "K", hover, vim.tbl_extend("keep", { desc = "Hover" }, keymap_opts))
+          vim.keymap.set("i", "<C-k>", signature, vim.tbl_extend("keep", { desc = "Signature" }, keymap_opts))
+          vim.keymap.set("n", "gd", vim.lsp.buf.definition, vim.tbl_extend("keep", { desc = "Definition" }, keymap_opts))
+          vim.keymap.set("n", "gD", vim.lsp.buf.declaration, vim.tbl_extend("keep", { desc = "Declaration" }, keymap_opts))
+          vim.keymap.set("n", "gi", vim.lsp.buf.implementation, vim.tbl_extend("keep", { desc = "Implementation" }, keymap_opts))
+          vim.keymap.set("n", "gr", vim.lsp.buf.references, vim.tbl_extend("keep", { desc = "References" }, keymap_opts))
+          vim.keymap.set("v", "<leader>gf", vim.lsp.buf.format, vim.tbl_extend("keep", { desc = "Format" }, keymap_opts))
+          vim.keymap.set("n", "<leader>gf", vim.lsp.buf.format, vim.tbl_extend("keep", { desc = "Format" }, keymap_opts))
+          vim.keymap.set("n", "<leader>ca", vim.lsp.buf.code_action, vim.tbl_extend("keep", { desc = "Code Action" }, keymap_opts))
+          vim.keymap.set("n", "<leader>r", vim.lsp.buf.rename, vim.tbl_extend("keep", { desc = "Rename" }, keymap_opts))
+          vim.keymap.set("n", "<leader>e", vim.diagnostic.open_float, vim.tbl_extend("keep", { desc = "Diagnostics" }, keymap_opts))
+          vim.keymap.set("n", "<leader>f", function()
+            vim.lsp.buf.format({ async = true, timeout_ms = 5000 })
+          end, vim.tbl_extend("keep", { desc = "Format" }, keymap_opts))
+        end,
+      })
+
+      -- =========================================================
+      -- Common server options
+      -- =========================================================
       local common = {
-        on_attach = on_attach,
         capabilities = capabilities,
         flags = {
           debounce_text_changes = 150,
         },
-        root_dir = function(fname)
-          return get_project_root(vim.fn.bufnr(fname))
+        root_markers = ROOT_MARKERS,
+        root_dir = function(bufnr, on_dir)
+          local fname = vim.api.nvim_buf_get_name(bufnr)
+          on_dir(get_project_root(fname))
         end,
       }
-      
-      -- Lua
-      lspconfig.lua_ls.setup(vim.tbl_deep_extend("force", common, {
+
+      -- =========================================================
+      -- Servers
+      -- =========================================================
+      vim.lsp.config("lua_ls", vim.tbl_deep_extend("force", common, {
         settings = {
           Lua = {
             runtime = { version = "LuaJIT" },
@@ -292,9 +287,8 @@ return {
           },
         },
       }))
-      
-      -- TypeScript/JavaScript
-      lspconfig.ts_ls.setup(vim.tbl_deep_extend("force", common, {
+
+      vim.lsp.config("ts_ls", vim.tbl_deep_extend("force", common, {
         init_options = {
           preferences = {
             includeCompletionsForImportStatements = true,
@@ -307,35 +301,30 @@ return {
           javascript = {},
         },
       }))
-      
-      -- Python (using pyright for speed, but still informative)
-      lspconfig.pyright.setup(vim.tbl_deep_extend("force", common, {
+
+      vim.lsp.config("pyright", vim.tbl_deep_extend("force", common, {
         settings = {
           python = {
             analysis = {
               autoSearchPaths = true,
               useLibraryCodeForTypes = true,
-              diagnosticMode = "openFilesOnly", -- only open files for speed
-              typeCheckingMode = "basic",        -- some type checking for better hints
-              autoImportCompletions = true,       -- suggest imports in completion
+              diagnosticMode = "openFilesOnly",
+              typeCheckingMode = "basic",
+              autoImportCompletions = true,
             },
           },
         },
       }))
-      
-      -- Go
-      lspconfig.gopls.setup(vim.tbl_deep_extend("force", common, {
+
+      vim.lsp.config("gopls", vim.tbl_deep_extend("force", common, {
         settings = {
           gopls = {
             usePlaceholders = true,
           },
         },
       }))
-      
-      -- C/C++
-      -- Keep detailed completions, but drop clang-tidy (heavy) for faster feedback.
-      -- If you want extra static analysis, you can add "--clang-tidy" back.
-      lspconfig.clangd.setup(vim.tbl_deep_extend("force", common, {
+
+      vim.lsp.config("clangd", vim.tbl_deep_extend("force", common, {
         cmd = {
           "clangd",
           "--background-index",
@@ -345,29 +334,36 @@ return {
           "--fallback-style=llvm",
         },
       }))
-      
-      -- Rust
-      -- More informative (inlay hints + clippy) but tuned for decent performance.
-      lspconfig.rust_analyzer.setup(vim.tbl_deep_extend("force", common, {
+
+      vim.lsp.config("rust_analyzer", vim.tbl_deep_extend("force", common, {
         settings = {
           ["rust-analyzer"] = {
             checkOnSave = {
-              command = "clippy", -- rich diagnostics on save
+              command = "clippy",
             },
             cargo = {
-              allFeatures = false,               -- avoid building all features by default
-              buildScripts = { enable = false }, -- speed up by skipping build scripts
+              allFeatures = false,
+              buildScripts = { enable = false },
             },
           },
         },
       }))
-      
-      -- Web
-      lspconfig.html.setup(common)
-      lspconfig.cssls.setup(common)
-      
-      -- CMake
-      lspconfig.cmake.setup(common)
+
+      vim.lsp.config("html", common)
+      vim.lsp.config("cssls", common)
+      vim.lsp.config("cmake", common)
+
+      vim.lsp.enable({
+        "lua_ls",
+        "ts_ls",
+        "pyright",
+        "gopls",
+        "clangd",
+        "rust_analyzer",
+        "html",
+        "cssls",
+        "cmake",
+      })
     end,
   },
 }

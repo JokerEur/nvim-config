@@ -139,11 +139,11 @@ return {
         completion = {
           completeopt = "menu,menuone,noinsert,noselect",
           keyword_length = 2,
-          -- Remove autocomplete events to prevent double triggering
-          -- autocomplete = {
-          --   cmp.TriggerEvent.InsertEnter,
-          --   cmp.TriggerEvent.TextChanged,
-          -- },
+          -- Default includes InsertEnter + TextChanged; InsertEnter can feel like a freeze in big projects
+          -- (especially with AI sources). Keep auto-complete while typing only.
+          autocomplete = {
+            cmp.TriggerEvent.TextChanged,
+          },
         },
 
         experimental = {

@@ -3,7 +3,9 @@ return {
   event = "BufReadPre",
   config = function()
     require("project_nvim").setup({
-      detection_methods = { "lsp", "pattern" },
+      -- NOTE: using "lsp" here can create a feedback loop (cwd changes -> LSP restarts).
+      -- Pattern-based detection is deterministic and avoids duplicate client attachments.
+      detection_methods = { "pattern" },
 
       patterns = {
         -- Git / generic
