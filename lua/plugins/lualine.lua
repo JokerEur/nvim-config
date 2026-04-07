@@ -233,6 +233,26 @@ return {
 			cond = conditions.hide_in_width,
 		})
 
+		-- Macro recording indicator
+		ins_left({
+			function()
+				local reg = vim.fn.reg_recording()
+				return reg ~= "" and ("  @" .. reg) or ""
+			end,
+			color = { fg = colors.red, gui = "bold" },
+		})
+
+		-- Search count
+		ins_left({
+			function()
+				if vim.v.hlsearch == 0 then return "" end
+				local ok, count = pcall(vim.fn.searchcount, { recompute = true, maxcount = 999 })
+				if not ok or count.total == 0 then return "" end
+				return string.format("  %d/%d", count.current, count.total)
+			end,
+			color = { fg = colors.cyan },
+		})
+
 		ins_left({
 			function()
 				return "%="

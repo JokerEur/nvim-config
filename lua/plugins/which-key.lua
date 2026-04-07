@@ -24,6 +24,7 @@ return {
 			{ "<leader>f", group = "Find", icon = " " },
 			{ "<leader>g", group = "Git", icon = "󰊢 " },
 			{ "<leader>c", group = "Code", icon = " " },
+			{ "<leader>a", group = "AI", icon = "󱚣 " },
 			{ "<leader>x", group = "Trouble", icon = "󱖫 " },
 			{ "<leader>b", group = "Buffer", icon = "󰈙 " },
 			{ "<leader>d", group = "Debug", icon = " " },
@@ -111,6 +112,8 @@ return {
 				{ pattern = "toggle", icon = "󰔡 ", color = "yellow" },
 				{ pattern = "lazy", icon = "󰒲 ", color = "cyan" },
 				{ pattern = "mason", icon = " ", color = "cyan" },
+				{ pattern = "claude", icon = "󱚣 ", color = "azure" },
+				{ pattern = "diff", icon = "󰦓 ", color = "yellow" },
 			},
 			colors = true,
 			keys = {

@@ -25,6 +25,18 @@ return {
 				desc = "Live Grep",
 			},
 			{
+				"<leader>fg",
+				function()
+					local saved = vim.fn.getreg('"')
+					vim.cmd('noau normal! y')
+					local sel = vim.fn.getreg('"')
+					vim.fn.setreg('"', saved)
+					require("telescope.builtin").live_grep({ default_text = sel })
+				end,
+				mode = "v",
+				desc = "Live Grep (selection)",
+			},
+			{
 				"<leader>fb",
 				function()
 					require("telescope.builtin").buffers()
@@ -64,9 +76,9 @@ return {
 
 					layout_strategy = "vertical",
 					layout_config = {
-						center = {
-							width = 0.6, -- 60% of screen width
-							height = 0.6, -- 60% of screen height
+						vertical = {
+							width = 0.6,
+							height = 0.8,
 							preview_cutoff = 30,
 							prompt_position = "top",
 						},
@@ -138,7 +150,7 @@ return {
 					find_files = {
 						find_command = { "fd", "--type", "f", "--hidden", "--exclude", ".git" },
 						layout_config = {
-							center = { width = 0.65, height = 0.55 },
+							vertical = { width = 0.65, height = 0.75 },
 						},
 					},
 					live_grep = {
@@ -146,17 +158,17 @@ return {
 							return { "--hidden" }
 						end,
 						layout_config = {
-							center = { width = 0.75, height = 0.65 },
+							vertical = { width = 0.75, height = 0.85 },
 						},
 					},
 					buffers = {
 						layout_config = {
-							center = { width = 0.6, height = 0.5 },
+							vertical = { width = 0.6, height = 0.6 },
 						},
 					},
 					help_tags = {
 						layout_config = {
-							center = { width = 0.6, height = 0.5 },
+							vertical = { width = 0.6, height = 0.7 },
 						},
 					},
 				},

@@ -34,7 +34,7 @@ return {
 				Operator = "",
 				TypeParameter = "",
 			},
-			separator = "-"
+			separator = " › "
 		})
 	end
 }

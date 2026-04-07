@@ -56,6 +56,9 @@ return {
 			case_insensitive_regex = false, -- Keep regex case-sensitive for precision
 		})
 
+		-- Ensure <leader>ui starts enabled by default on startup
+		pcall(illuminate.resume)
+
 		-- Underline-only highlight for illuminated words (no background fill)
 		local function set_illuminate_highlights()
 			local ok = pcall(vim.api.nvim_set_hl, 0, 'IlluminatedWordText', {

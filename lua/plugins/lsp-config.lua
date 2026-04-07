@@ -88,24 +88,12 @@ return {
           capabilities = vim.tbl_deep_extend("force", capabilities, cmp_lsp.default_capabilities())
         end
       end
+      -- Disable file watching to reduce LSP overhead
+      capabilities.workspace.didChangeWatchedFiles.dynamicRegistration = false
 
       -- =========================================================
       -- Fast floating window helpers
       -- =========================================================
-      local function open_float(contents, filetype)
-        local _, win = vim.lsp.util.open_floating_preview(contents, filetype, {
-          border = "single",
-          focusable = false,
-          max_width = 80,
-          max_height = 15,
-          close_events = { "CursorMoved", "CursorMovedI", "InsertEnter" },
-        })
-
-        if win and vim.api.nvim_win_is_valid(win) then
-          vim.api.nvim_win_set_option(win, "winhl", "Normal:NormalFloat,FloatBorder:FloatBorder")
-        end
-      end
-
       local hover_win = nil
       local hover_pending = false
 
@@ -117,7 +105,9 @@ return {
         if hover_pending then return end
         hover_pending = true
 
-        local params = vim.lsp.util.make_position_params()
+        local clients = vim.lsp.get_clients({ bufnr = 0, method = "textDocument/hover" })
+        local encoding = clients[1] and clients[1].offset_encoding or "utf-16"
+        local params = vim.lsp.util.make_position_params(0, encoding)
         vim.lsp.buf_request(0, "textDocument/hover", params, function(_, result)
           hover_pending = false
           if not result or not result.contents then return end
@@ -156,25 +146,73 @@ return {
         end)
       end
 
+      local sig_win = nil
+
+      local function close_sig_win()
+        if sig_win and vim.api.nvim_win_is_valid(sig_win) then
+          vim.api.nvim_win_close(sig_win, true)
+          sig_win = nil
+        end
+      end
+
       local function signature()
-        local params = vim.lsp.util.make_position_params()
+        close_sig_win()
+        local clients = vim.lsp.get_clients({ bufnr = 0, method = "textDocument/signatureHelp" })
+        local encoding = clients[1] and clients[1].offset_encoding or "utf-16"
+        local params = vim.lsp.util.make_position_params(0, encoding)
         vim.lsp.buf_request(0, "textDocument/signatureHelp", params, function(_, result)
           if not result or not result.signatures or #result.signatures == 0 then return end
 
-          local lines = vim.lsp.util.convert_signature_help_to_markdown_lines(result)
-          if #lines == 0 then return end
+          local idx = (result.activeSignature or 0) + 1
+          local sig = result.signatures[idx] or result.signatures[1]
+          if not sig then return end
 
-          if #lines > 30 then
-            local new_lines = {}
-            for i = 1, 30 do
-              new_lines[i] = lines[i]
+          local ft = vim.bo.filetype
+          local lines = {}
+
+          -- Signature with syntax highlighting
+          table.insert(lines, "```" .. ft)
+          table.insert(lines, sig.label)
+          table.insert(lines, "```")
+
+          -- Active parameter documentation
+          local active_idx = result.activeParameter
+          if active_idx == nil then active_idx = sig.activeParameter end
+          local param = active_idx ~= nil and sig.parameters and sig.parameters[active_idx + 1]
+          if param and param.documentation then
+            local pdoc = type(param.documentation) == "table" and param.documentation.value or param.documentation
+            if pdoc and pdoc ~= "" then
+              local plabel = type(param.label) == "string" and param.label or ""
+              table.insert(lines, "")
+              table.insert(lines, (plabel ~= "" and ("**" .. plabel .. "**: ") or "") .. pdoc)
             end
-            new_lines[#new_lines + 1] = ""
-            new_lines[#new_lines + 1] = "..." -- truncated
-            lines = new_lines
           end
 
-          open_float(lines, "markdown")
+          -- Brief signature documentation
+          if sig.documentation then
+            local doc = type(sig.documentation) == "table" and sig.documentation.value or sig.documentation
+            if doc and doc ~= "" then
+              table.insert(lines, "")
+              local doc_lines = vim.split(doc, "\n", { plain = true })
+              for i, l in ipairs(doc_lines) do
+                if i > 6 then
+                  table.insert(lines, "...")
+                  break
+                end
+                table.insert(lines, l)
+              end
+            end
+          end
+
+          local _, win = vim.lsp.util.open_floating_preview(lines, "markdown", {
+            border = "single",
+            focusable = false,
+            max_width = 80,
+            max_height = 15,
+            close_events = { "CursorMoved", "InsertLeave" },
+            anchor_bias = "above",
+          })
+          sig_win = win
         end)
       end
 
@@ -239,18 +277,26 @@ return {
 
           local bufnr = args.buf
           local keymap_opts = { buffer = bufnr }
+
+          if client.supports_method("textDocument/inlayHint") then
+            vim.lsp.inlay_hint.enable(true, { bufnr = bufnr })
+          end
+
           vim.keymap.set("n", "K", hover, vim.tbl_extend("keep", { desc = "Hover" }, keymap_opts))
           vim.keymap.set("i", "<C-k>", signature, vim.tbl_extend("keep", { desc = "Signature" }, keymap_opts))
+
+          vim.api.nvim_create_autocmd({ "InsertLeave", "CursorMoved" }, {
+            buffer = bufnr,
+            callback = close_sig_win,
+          })
           vim.keymap.set("n", "gd", vim.lsp.buf.definition, vim.tbl_extend("keep", { desc = "Definition" }, keymap_opts))
           vim.keymap.set("n", "gD", vim.lsp.buf.declaration, vim.tbl_extend("keep", { desc = "Declaration" }, keymap_opts))
           vim.keymap.set("n", "gi", vim.lsp.buf.implementation, vim.tbl_extend("keep", { desc = "Implementation" }, keymap_opts))
           vim.keymap.set("n", "gr", vim.lsp.buf.references, vim.tbl_extend("keep", { desc = "References" }, keymap_opts))
-          vim.keymap.set("v", "<leader>gf", vim.lsp.buf.format, vim.tbl_extend("keep", { desc = "Format" }, keymap_opts))
-          vim.keymap.set("n", "<leader>gf", vim.lsp.buf.format, vim.tbl_extend("keep", { desc = "Format" }, keymap_opts))
           vim.keymap.set("n", "<leader>ca", vim.lsp.buf.code_action, vim.tbl_extend("keep", { desc = "Code Action" }, keymap_opts))
           vim.keymap.set("n", "<leader>r", vim.lsp.buf.rename, vim.tbl_extend("keep", { desc = "Rename" }, keymap_opts))
-          vim.keymap.set("n", "<leader>e", vim.diagnostic.open_float, vim.tbl_extend("keep", { desc = "Diagnostics" }, keymap_opts))
-          vim.keymap.set("n", "<leader>f", function()
+          vim.keymap.set("n", "<leader>ld", vim.diagnostic.open_float, vim.tbl_extend("keep", { desc = "Diagnostics float" }, keymap_opts))
+          vim.keymap.set({ "n", "v" }, "<leader>lf", function()
             vim.lsp.buf.format({ async = true, timeout_ms = 5000 })
           end, vim.tbl_extend("keep", { desc = "Format" }, keymap_opts))
         end,
@@ -280,10 +326,21 @@ return {
             runtime = { version = "LuaJIT" },
             diagnostics = { globals = { "vim" } },
             workspace = {
-              library = vim.api.nvim_get_runtime_file("", true),
+              library = { vim.env.VIMRUNTIME },
               checkThirdParty = false,
+              maxPreload = 2000,
+              preloadFileSize = 1000,
             },
             telemetry = { enable = false },
+            hint = {
+              enable = true,
+              arrayIndex = "Disable",
+              await = true,
+              paramName = "All",
+              paramType = true,
+              semicolon = "Disable",
+              setType = true,
+            },
           },
         },
       }))
@@ -297,8 +354,30 @@ return {
           },
         },
         settings = {
-          typescript = {},
-          javascript = {},
+          typescript = {
+            inlayHints = {
+              includeInlayParameterNameHints = "all",
+              includeInlayParameterNameHintsWhenArgumentMatchesName = false,
+              includeInlayFunctionParameterTypeHints = true,
+              includeInlayVariableTypeHints = true,
+              includeInlayVariableTypeHintsWhenTypeMatchesName = false,
+              includeInlayPropertyDeclarationTypeHints = true,
+              includeInlayFunctionLikeReturnTypeHints = true,
+              includeInlayEnumMemberValueHints = true,
+            },
+          },
+          javascript = {
+            inlayHints = {
+              includeInlayParameterNameHints = "all",
+              includeInlayParameterNameHintsWhenArgumentMatchesName = false,
+              includeInlayFunctionParameterTypeHints = true,
+              includeInlayVariableTypeHints = true,
+              includeInlayVariableTypeHintsWhenTypeMatchesName = false,
+              includeInlayPropertyDeclarationTypeHints = true,
+              includeInlayFunctionLikeReturnTypeHints = true,
+              includeInlayEnumMemberValueHints = true,
+            },
+          },
         },
       }))
 
@@ -311,6 +390,12 @@ return {
               diagnosticMode = "openFilesOnly",
               typeCheckingMode = "basic",
               autoImportCompletions = true,
+              inlayHints = {
+                variableTypes = true,
+                functionReturnTypes = true,
+                callArgumentNames = true,
+                pytestParameters = true,
+              },
             },
           },
         },
@@ -320,6 +405,15 @@ return {
         settings = {
           gopls = {
             usePlaceholders = true,
+            hints = {
+              assignVariableTypes = true,
+              compositeLiteralFields = true,
+              compositeLiteralTypes = true,
+              constantValues = true,
+              functionTypeParameters = true,
+              parameterNames = true,
+              rangeVariableTypes = true,
+            },
           },
         },
       }))
@@ -344,6 +438,15 @@ return {
             cargo = {
               allFeatures = false,
               buildScripts = { enable = false },
+            },
+            inlayHints = {
+              bindingModeHints = { enable = true },
+              chainingHints = { enable = true },
+              closingBraceHints = { enable = true, minLines = 25 },
+              closureReturnTypeHints = { enable = "always" },
+              parameterHints = { enable = true },
+              typeHints = { enable = true },
+              reborrowHints = { enable = "never" },
             },
           },
         },

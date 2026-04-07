@@ -30,7 +30,6 @@ return {
       "hrsh7th/cmp-path",
       "hrsh7th/cmp-buffer",
       "onsails/lspkind.nvim",
-      "tzachar/cmp-tabnine",
     },
     config = function()
       local cmp = require("cmp")
@@ -44,7 +43,6 @@ return {
         ellipsis_char = "...",
         menu = {
           nvim_lsp = "LSP",
-          cmp_tabnine = "AI",
           luasnip = "Snip",
           buffer = "Buf",
           path = "Path",
@@ -99,7 +97,6 @@ return {
         -- Prioritized sources with limits
         sources = {
           { name = "nvim_lsp", priority = 1000, max_item_count = 12 },
-          { name = "cmp_tabnine", priority = 950, max_item_count = 3 },
           { name = "luasnip", priority = 750, max_item_count = 3 },
           { name = "path", priority = 500 },
           { 
@@ -129,10 +126,10 @@ return {
 
         -- Performance optimizations
         performance = {
-          debounce = 20,
-          throttle = 40,
+          debounce = 60,
+          throttle = 20,
           max_view_entries = 12,
-          fetching_timeout = 75,
+          fetching_timeout = 200,
         },
 
         -- Completion behavior - IMPORTANT: Remove autocomplete triggers
@@ -196,7 +193,7 @@ return {
       vim.o.completeopt = "menu,menuone,noselect,noinsert"
       vim.o.pumheight = 10
       vim.o.pumblend = 0  -- Disable transparency for speed
-      vim.o.updatetime = 100  -- Faster completion triggers
+      vim.o.updatetime = 300
       
       -- Disable Neovim's native completion menu style
       vim.cmd([[

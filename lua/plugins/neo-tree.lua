@@ -51,7 +51,10 @@ return {
 					indent_marker = "│",
 					last_indent_marker = "└",
 					highlight = "NeoTreeIndentMarker",
-					with_expanders = false,
+					with_expanders = true,
+				expander_collapsed = "",
+				expander_expanded = "",
+				expander_highlight = "NeoTreeExpander",
 				},
 				icon = {
 					folder_closed = "",
