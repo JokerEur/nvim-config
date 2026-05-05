@@ -9,6 +9,9 @@ return {
     { "<leader>gB", function() Snacks.gitbrowse() end,                        desc = "Open in browser (git)" },
     { "<leader>uz", function() Snacks.zen() end,                              desc = "Toggle zen mode" },
     { "<leader>uZ", function() Snacks.zen.zoom() end,                         desc = "Toggle zoom" },
+    { "<leader>tt", function() Snacks.terminal() end,                         desc = "Toggle terminal" },
+    { "<leader>tT", function() Snacks.terminal(nil, { cwd = vim.fn.expand("%:p:h") }) end, desc = "Terminal (file dir)" },
+    { "<C-`>",      function() Snacks.terminal() end,                         desc = "Toggle terminal", mode = { "n", "t" } },
   },
   opts = {
     -- Disable snacks notifier so fidget.nvim handles all vim.notify calls
@@ -35,6 +38,9 @@ return {
 
     -- Dim code outside of current scope
     dim = { enabled = true },
+
+    -- Floating terminal
+    terminal = { enabled = true },
 
     -- Startup dashboard
     dashboard = {
