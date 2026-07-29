@@ -34,11 +34,10 @@ return {
             remove_blankline_trail = true,
         },
         scope = {
-            -- Keep scope enabled by default (<leader>us toggles it)
             enabled            = true,
             injected_languages = false,
-            show_start         = true, -- underline at scope opening line
-            show_end           = true, -- underline at scope closing line
+            show_start         = false,
+            show_end           = false,
         },
         exclude = {
             -- Disable guides in UI/special buffers where they add noise
@@ -70,7 +69,7 @@ return {
         hooks.register(hooks.type.ACTIVE, function(bufnr)
             local name = vim.api.nvim_buf_get_name(bufnr)
             if name ~= "" then
-                local ok_stat, stat = pcall(vim.loop.fs_stat, name)
+                local ok_stat, stat = pcall(vim.uv.fs_stat, name)
                 if ok_stat and stat and stat.size and stat.size > 256 * 1024 then
                     return false
                 end

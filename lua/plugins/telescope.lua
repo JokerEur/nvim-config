@@ -5,6 +5,7 @@ return {
 		tag = "0.1.8",
 		dependencies = {
 			"nvim-lua/plenary.nvim",
+			"nvim-tree/nvim-web-devicons",
 			{ "nvim-telescope/telescope-fzf-native.nvim", build = "make" },
 			"nvim-telescope/telescope-ui-select.nvim",
 		},
@@ -57,17 +58,13 @@ return {
 				end,
 				desc = "Find word in current buffer",
 			},
-			{
-				"<leader>ca",
-				vim.lsp.buf.code_action,
-				desc = "Code Actions",
-			},
 		},
 		config = function()
 			local telescope = require("telescope")
 			local actions = require("telescope.actions")
-			local open_with_trouble = require("trouble.sources.telescope").open
-			local add_to_trouble = require("trouble.sources.telescope").add
+			local trouble_ok, trouble_tel = pcall(require, "trouble.sources.telescope")
+			local open_with_trouble = trouble_ok and trouble_tel.open or nil
+			local add_to_trouble   = trouble_ok and trouble_tel.add  or nil
 
 			telescope.setup({
 				defaults = {
@@ -184,6 +181,11 @@ return {
 						require("telescope.themes").get_dropdown({
 							width = 0.4,
 							previewer = false,
+							borderchars = {
+								prompt  = { "─", "│", " ", "│", "┌", "┐", "│", "│" },
+								results = { "─", "│", "─", "│", "├", "┤", "┘", "└" },
+								preview = { "─", "│", "─", "│", "┌", "┐", "┘", "└" },
+							},
 						}),
 					},
 				},
@@ -193,38 +195,6 @@ return {
 			telescope.load_extension("fzf")
 			telescope.load_extension("ui-select")
 
-			-- Clean highlights for borderless design
-			vim.api.nvim_create_autocmd("ColorScheme", {
-				pattern = "*",
-				callback = function()
-					local colors = {
-						bg = "#1F1F28",
-						bg_dark = "#16161D",
-						bg_highlight = "#2A2A37",
-						fg = "#DCD7BA",
-						yellow = "#E6C384",
-						green = "#98BB6C",
-						blue = "#7E9CD8",
-					}
-
-					vim.api.nvim_set_hl(0, "TelescopeNormal", { bg = colors.bg, fg = colors.fg })
-					vim.api.nvim_set_hl(0, "TelescopePromptNormal", { bg = colors.bg_dark })
-					vim.api.nvim_set_hl(0, "TelescopePromptPrefix", { fg = colors.yellow, bold = true })
-					vim.api.nvim_set_hl(0, "TelescopeSelection", { bg = colors.bg_highlight, bold = true })
-					vim.api.nvim_set_hl(0, "TelescopeMatching", { fg = colors.green, bold = true })
-
-					-- Remove border highlights since we don't have borders
-					vim.api.nvim_set_hl(0, "TelescopeBorder", {})
-					vim.api.nvim_set_hl(0, "TelescopePromptBorder", {})
-					vim.api.nvim_set_hl(0, "TelescopePreviewBorder", {})
-				end,
-			})
-
-			-- Apply clean highlights immediately
-			vim.schedule(function()
-				vim.api.nvim_set_hl(0, "TelescopeSelection", { link = "Visual" })
-				vim.api.nvim_set_hl(0, "TelescopeNormal", { link = "Normal" })
-			end)
 		end,
 	},
 }

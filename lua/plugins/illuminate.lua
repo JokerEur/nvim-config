@@ -46,7 +46,7 @@ return {
 
 			-- Disable illuminate in specific filetypes
 			should_enable = function(bufnr)
-				local filetype = vim.api.nvim_buf_get_option(bufnr, 'filetype')
+				local filetype = vim.bo[bufnr].filetype
 				return not vim.tbl_contains({
 					'nerdtree', 'packer', 'help', 'dashboard',
 					'log', 'man', 'nofile', 'prompt'
@@ -59,22 +59,19 @@ return {
 		-- Ensure <leader>ui starts enabled by default on startup
 		pcall(illuminate.resume)
 
-		-- Underline-only highlight for illuminated words (no background fill)
+		-- Very subtle background-only highlight for illuminated words
 		local function set_illuminate_highlights()
 			local ok = pcall(vim.api.nvim_set_hl, 0, 'IlluminatedWordText', {
-				underline = true,
-				bold = false,
+				bg = "#2A2A37",
 			})
 			if not ok then return end
 
 			vim.api.nvim_set_hl(0, 'IlluminatedWordRead', {
-				underline = true,
-				bold = false,
+				bg = "#2A2A37",
 			})
 
 			vim.api.nvim_set_hl(0, 'IlluminatedWordWrite', {
-				underline = true,
-				bold = false,
+				bg = "#2D3640",
 			})
 		end
 

@@ -6,7 +6,7 @@ return {
 		"tpope/vim-fugitive",
 	},
 	keys = {
-		{ "<leader>gl", "<cmd>Flog -all<cr>", desc = "Git Log (all branches)" },
+		{ "<leader>gG", "<cmd>Flog -all<cr>", desc = "Git Graph (all branches)" },
 		{ "<leader>gL", "<cmd>Flog -path=%<cr>", desc = "Git Log (current file)" },
 		{ "<leader>gb", "<cmd>Flog -all -max-count=100<cr>", desc = "Git Branches" },
 	},

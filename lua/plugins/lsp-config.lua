@@ -14,13 +14,13 @@ local ROOT_MARKERS = {
 
 local function get_project_root(fname)
   fname = fname or vim.api.nvim_buf_get_name(0)
-  if fname == "" then return vim.loop.cwd() end
+  if fname == "" then return vim.uv.cwd() end
 
   local dir = vim.fs.dirname(fname)
   local found = vim.fs.find(ROOT_MARKERS, {
     path = dir,
     upward = true,
-    stop = vim.loop.os_homedir(),
+    stop = vim.uv.os_homedir(),
   })[1]
 
   -- Fall back to the file's directory (better for single-file projects)
@@ -38,41 +38,31 @@ return {
   },
 
   {
-    "williamboman/mason-lspconfig.nvim",
-    event = "VeryLazy",
-    opts = {
-      ensure_installed = {
-        "lua_ls",
-        "rust_analyzer",
-        "clangd",
-        "pyright", -- Faster than pylsp
-        "gopls",
-        "ts_ls",
-        "html",
-        "cssls",
-      },
-      automatic_installation = true,
-      handlers = {}, -- we configure servers manually below
-    },
-  },
-
-  {
     "neovim/nvim-lspconfig",
-    ft = {
-      "lua",
-      "python",
-      "go",
-      "c",
-      "cpp",
-      "rust",
-      "html",
-      "css",
-      "javascript",
-      "typescript",
-      "typescriptreact",
-      "javascriptreact",
-      "vue",
-      "cmake",
+    -- Load before any buffer is read so vim.lsp.config() is registered
+    -- before mason-lspconfig or any FileType autocmd can start servers.
+    event = { "BufReadPre", "BufNewFile" },
+    dependencies = {
+      "williamboman/mason.nvim",
+      {
+        "williamboman/mason-lspconfig.nvim",
+        opts = {
+          ensure_installed = {
+            "lua_ls",
+            "rust_analyzer",
+            "clangd",
+            "pyright",
+            "gopls",
+            "ts_ls",
+            "html",
+            "cssls",
+          },
+          -- Do NOT auto-enable servers — we call vim.lsp.enable() manually
+          -- below after configs are registered.
+          automatic_installation = false,
+          handlers = {},
+        },
+      },
     },
     config = function()
       -- Use Neovim 0.11+ native API: vim.lsp.config + vim.lsp.enable
@@ -92,59 +82,15 @@ return {
       capabilities.workspace.didChangeWatchedFiles.dynamicRegistration = false
 
       -- =========================================================
-      -- Fast floating window helpers
+      -- Hover options (passed directly via 0.11+ API in the keymap below)
       -- =========================================================
-      local hover_win = nil
-      local hover_pending = false
-
-      local function hover()
-        if hover_win and vim.api.nvim_win_is_valid(hover_win) then
-          vim.api.nvim_win_close(hover_win, true)
-          hover_win = nil
-        end
-        if hover_pending then return end
-        hover_pending = true
-
-        local clients = vim.lsp.get_clients({ bufnr = 0, method = "textDocument/hover" })
-        local encoding = clients[1] and clients[1].offset_encoding or "utf-16"
-        local params = vim.lsp.util.make_position_params(0, encoding)
-        vim.lsp.buf_request(0, "textDocument/hover", params, function(_, result)
-          hover_pending = false
-          if not result or not result.contents then return end
-
-          local lines = vim.lsp.util.convert_input_to_markdown_lines(result.contents)
-          if #lines == 0 then return end
-
-          if #lines > 30 then
-            local new_lines = {}
-            for i = 1, 30 do
-              new_lines[i] = lines[i]
-            end
-            new_lines[#new_lines + 1] = ""
-            new_lines[#new_lines + 1] = "..." -- truncated
-            lines = new_lines
-          end
-
-          local _, win = vim.lsp.util.open_floating_preview(lines, "markdown", {
-            border = "single",
-            focusable = false,
-            max_width = 80,
-            max_height = 15,
-            close_events = { "CursorMoved", "CursorMovedI", "InsertEnter" },
-          })
-          hover_win = win
-
-          vim.api.nvim_create_autocmd({ "CursorMoved", "CursorMovedI", "InsertEnter" }, {
-            once = true,
-            callback = function()
-              if hover_win and vim.api.nvim_win_is_valid(hover_win) then
-                vim.api.nvim_win_close(hover_win, true)
-                hover_win = nil
-              end
-            end,
-          })
-        end)
-      end
+      local hover_opts = {
+        border = "single",
+        winhighlight = "Normal:NormalFloat,FloatBorder:FloatBorder",
+        max_width = 80,
+        max_height = 25,
+        focusable = true,
+      }
 
       local sig_win = nil
 
@@ -238,13 +184,82 @@ return {
         return diagnostic.message
       end
 
+      -- Icons kept in sync with the lualine diagnostics segment.
+      local diagnostic_icons = {
+        [vim.diagnostic.severity.ERROR] = " ",
+        [vim.diagnostic.severity.WARN]  = " ",
+        [vim.diagnostic.severity.INFO]  = " ",
+        [vim.diagnostic.severity.HINT]  = " ",
+      }
+
+      -- Just a colored dot on every diagnostic line EXCEPT the current one — no
+      -- inline message text. One dot per diagnostic, tinted by severity. The
+      -- current line instead gets the full multiline `virtual_lines` tree below.
+      local virt_text_opts = {
+        current_line = false,
+        prefix = "●",
+        spacing = 1,
+        -- Empty message: only the dot renders (still severity-highlighted).
+        format = function() return "" end,
+      }
+
+      -- Full multiline "tree" for the current line — but managed manually via a
+      -- dedicated namespace instead of Neovim's native
+      -- `virtual_lines = { current_line = true }`. The native handler also renders
+      -- a diagnostic whenever the cursor is anywhere inside its (often multi-line)
+      -- range, drawing the tree at the range's *start* — so a wide rust-analyzer
+      -- macro error would show its tree many lines away from the cursor. We instead
+      -- render only diagnostics that *start* on the cursor's exact line (i.e. the
+      -- lines that carry a dot), so the tree always sits right under the cursor.
+      local vl_ns = vim.api.nvim_create_namespace("nvim.diagnostic.current_line_lines")
+      -- This namespace draws ONLY the tree; signs/dots/underline stay on the main
+      -- (LSP) namespace so nothing is duplicated.
       vim.diagnostic.config({
-        virtual_text = {
-          prefix = "●",
-          spacing = 2,
-        },
+        virtual_lines = { current_line = false, format = diagnostic_format },
+        virtual_text = false,
         signs = false,
-        underline = true,
+        underline = false,
+      }, vl_ns)
+
+      local vl_enabled = true
+      local vl_last_line = -1
+
+      local function refresh_current_line_lines(force)
+        local bufnr = vim.api.nvim_get_current_buf()
+        if not vl_enabled then
+          vim.diagnostic.hide(vl_ns, bufnr)
+          return
+        end
+        local lnum = vim.api.nvim_win_get_cursor(0)[1] - 1
+        if not force and lnum == vl_last_line then return end
+        vl_last_line = lnum
+        -- Only diagnostics that START on this line — not ones whose range merely
+        -- spans it (that is what caused the tree to "stick" far from the cursor).
+        local diags = vim.tbl_filter(function(d)
+          return d.lnum == lnum
+        end, vim.diagnostic.get(bufnr))
+        -- Empty list still clears the namespace (show() hides first), so the tree
+        -- disappears the moment the cursor leaves a diagnostic line.
+        vim.diagnostic.show(vl_ns, bufnr, diags)
+      end
+
+      vim.diagnostic.config({
+        virtual_text = virt_text_opts,
+        virtual_lines = false,
+        signs = {
+          text = diagnostic_icons,
+          numhl = {
+            [vim.diagnostic.severity.ERROR] = "DiagnosticSignError",
+            [vim.diagnostic.severity.WARN]  = "DiagnosticSignWarn",
+            [vim.diagnostic.severity.INFO]  = "DiagnosticSignInfo",
+            [vim.diagnostic.severity.HINT]  = "DiagnosticSignHint",
+          },
+        },
+        underline = {
+          -- Only underline warnings/errors; skip the noisy rust-analyzer Hint
+          -- diagnostics that otherwise underline nearly the whole buffer.
+          severity = { min = vim.diagnostic.severity.WARN },
+        },
         update_in_insert = false,
         severity_sort = true,
         float = {
@@ -256,6 +271,58 @@ return {
         },
       })
 
+      -- Drive the current-line tree: follow the cursor (line changes only) and
+      -- re-render when diagnostics update or we switch buffer/window.
+      local vl_group = vim.api.nvim_create_augroup("diagnostic_current_line_lines", { clear = true })
+      vim.api.nvim_create_autocmd("CursorMoved", {
+        group = vl_group,
+        callback = function() refresh_current_line_lines(false) end,
+      })
+      vim.api.nvim_create_autocmd({ "DiagnosticChanged", "BufEnter", "WinEnter" }, {
+        group = vl_group,
+        callback = function() refresh_current_line_lines(true) end,
+      })
+
+      -- =========================================================
+      -- Diagnostic navigation (global — always available)
+      -- =========================================================
+      -- Landing on a diagnostic line surfaces the full `virtual_lines` message,
+      -- so no jump-float is needed here.
+      local function jump(count, severity)
+        return function()
+          vim.diagnostic.jump({ count = count, severity = severity, float = false })
+        end
+      end
+
+      local sev = vim.diagnostic.severity
+      vim.keymap.set("n", "]d", jump(1),  { desc = "Next diagnostic" })
+      vim.keymap.set("n", "[d", jump(-1), { desc = "Prev diagnostic" })
+      vim.keymap.set("n", "]e", jump(1, sev.ERROR),  { desc = "Next error" })
+      vim.keymap.set("n", "[e", jump(-1, sev.ERROR), { desc = "Prev error" })
+      vim.keymap.set("n", "]w", jump(1, sev.WARN),  { desc = "Next warning" })
+      vim.keymap.set("n", "[w", jump(-1, sev.WARN), { desc = "Prev warning" })
+
+      -- =========================================================
+      -- Diagnostic display toggles (under <leader>u = UI/Toggle)
+      -- =========================================================
+      vim.keymap.set("n", "<leader>ux", function()
+        vl_enabled = not vl_enabled
+        refresh_current_line_lines(true)
+        vim.notify("Diagnostic lines " .. (vl_enabled and "on" or "off"), vim.log.levels.INFO)
+      end, { desc = "Toggle diagnostic virtual lines" })
+
+      vim.keymap.set("n", "<leader>uv", function()
+        local on = vim.diagnostic.config().virtual_text ~= false
+        vim.diagnostic.config({ virtual_text = on and false or virt_text_opts })
+        vim.notify("Diagnostic virtual text " .. (on and "off" or "on"), vim.log.levels.INFO)
+      end, { desc = "Toggle diagnostic virtual text" })
+
+      vim.keymap.set("n", "<leader>ud", function()
+        local on = vim.diagnostic.is_enabled()
+        vim.diagnostic.enable(not on)
+        vim.notify("Diagnostics " .. (on and "off" or "on"), vim.log.levels.INFO)
+      end, { desc = "Toggle diagnostics" })
+
       -- =========================================================
       -- LspAttach: keymaps and per-client tweaks (replacement for on_attach)
       -- =========================================================
@@ -263,6 +330,13 @@ return {
         callback = function(args)
           local client = vim.lsp.get_client_by_id(args.data.client_id)
           if not client then return end
+
+          -- Remove Neovim 0.11 built-in gr* mappings so our buffer-local `gr`
+          -- (references) isn't treated as a prefix and fires immediately.
+          for _, k in ipairs({ "grn", "gra", "gri", "grr", "grt" }) do
+            pcall(vim.keymap.del, "n", k)
+          end
+          pcall(vim.keymap.del, "x", "gra")
 
           local formatting_servers = {
             tsserver = true,
@@ -282,17 +356,23 @@ return {
             vim.lsp.inlay_hint.enable(true, { bufnr = bufnr })
           end
 
-          vim.keymap.set("n", "K", hover, vim.tbl_extend("keep", { desc = "Hover" }, keymap_opts))
+          vim.keymap.set("n", "K", function() vim.lsp.buf.hover(hover_opts) end, vim.tbl_extend("keep", { desc = "Hover" }, keymap_opts))
           vim.keymap.set("i", "<C-k>", signature, vim.tbl_extend("keep", { desc = "Signature" }, keymap_opts))
 
           vim.api.nvim_create_autocmd({ "InsertLeave", "CursorMoved" }, {
             buffer = bufnr,
             callback = close_sig_win,
           })
-          vim.keymap.set("n", "gd", vim.lsp.buf.definition, vim.tbl_extend("keep", { desc = "Definition" }, keymap_opts))
+          vim.keymap.set("n", "gd", function()
+            require("telescope.builtin").lsp_definitions({ reuse_win = true, initial_mode = "normal" })
+          end, vim.tbl_extend("keep", { desc = "Definition" }, keymap_opts))
           vim.keymap.set("n", "gD", vim.lsp.buf.declaration, vim.tbl_extend("keep", { desc = "Declaration" }, keymap_opts))
-          vim.keymap.set("n", "gi", vim.lsp.buf.implementation, vim.tbl_extend("keep", { desc = "Implementation" }, keymap_opts))
-          vim.keymap.set("n", "gr", vim.lsp.buf.references, vim.tbl_extend("keep", { desc = "References" }, keymap_opts))
+          vim.keymap.set("n", "gi", function()
+            require("telescope.builtin").lsp_implementations({ reuse_win = true, initial_mode = "normal" })
+          end, vim.tbl_extend("keep", { desc = "Implementation" }, keymap_opts))
+          vim.keymap.set("n", "gr", function()
+            require("telescope.builtin").lsp_references({ include_declaration = false, initial_mode = "normal" })
+          end, vim.tbl_extend("keep", { desc = "References" }, keymap_opts))
           vim.keymap.set("n", "<leader>ca", vim.lsp.buf.code_action, vim.tbl_extend("keep", { desc = "Code Action" }, keymap_opts))
           vim.keymap.set("n", "<leader>r", vim.lsp.buf.rename, vim.tbl_extend("keep", { desc = "Rename" }, keymap_opts))
           vim.keymap.set("n", "<leader>ld", vim.diagnostic.open_float, vim.tbl_extend("keep", { desc = "Diagnostics float" }, keymap_opts))
@@ -405,6 +485,7 @@ return {
         settings = {
           gopls = {
             usePlaceholders = true,
+            deepCompletion = true,
             hints = {
               assignVariableTypes = true,
               compositeLiteralFields = true,
@@ -421,7 +502,15 @@ return {
       vim.lsp.config("clangd", vim.tbl_deep_extend("force", common, {
         cmd = {
           "clangd",
+          -- Parallelise background indexing across cores (leave a few free).
+          "-j=" .. math.max(2, math.floor((vim.uv.available_parallelism() or 4) * 0.6)),
+          -- Persist the index to .cache/clangd/ so reopening a project skips
+          -- re-indexing. On by default, but make the intent explicit.
           "--background-index",
+          "--background-index-priority=low",
+          -- Keep precompiled headers in RAM instead of on disk (faster
+          -- completions/diagnostics; costs memory on big TUs).
+          "--pch-storage=memory",
           "--header-insertion=iwyu",
           "--completion-style=detailed",
           "--function-arg-placeholders",
@@ -430,14 +519,54 @@ return {
       }))
 
       vim.lsp.config("rust_analyzer", vim.tbl_deep_extend("force", common, {
+        -- Prefer the rustup proxy at ~/.cargo/bin/rust-analyzer: it honours the
+        -- project's rust-toolchain.toml (per-project pin) and gives sysroot
+        -- access for stdlib docs. Do NOT hardcode `rustup run stable` — that
+        -- overrides rust-toolchain.toml and can pin an outdated `stable`.
+        -- Falls back to PATH (Mason standalone) if the proxy is unavailable.
+        cmd = (function()
+          local proxy = vim.fn.expand("~/.cargo/bin/rust-analyzer")
+          if vim.fn.executable(proxy) == 1 then
+            return { proxy }
+          end
+          return { "rust-analyzer" }
+        end)(),
         settings = {
           ["rust-analyzer"] = {
-            checkOnSave = {
+            checkOnSave = true,
+            check = {
               command = "clippy",
+              -- Speed: don't compile tests/benches/examples on every save,
+              -- and use a separate target dir so the on-save check never
+              -- blocks on the file lock held by a manual `cargo build`.
+              allTargets = false,
+              extraArgs = { "--target-dir", "target/rust-analyzer" },
+              -- Cache rustc invocations from the on-save clippy run. Big win on
+              -- dependencies and cold `target-dir` starts. Only applies if
+              -- `sccache` is on PATH — otherwise this env var is ignored and
+              -- compilation falls back to plain rustc.
+              extraEnv = vim.fn.executable("sccache") == 1
+                and { RUSTC_WRAPPER = "sccache" }
+                or nil,
             },
             cargo = {
-              allFeatures = false,
-              buildScripts = { enable = false },
+              allFeatures = true,
+              buildScripts = { enable = true },
+              sysroot = "discover",
+            },
+            rustc = {
+              source = "discover",
+            },
+            procMacro = {
+              enable = true,
+            },
+            -- Ensure stdlib hover docs (Vec, Option, etc.) are rendered
+            hover = {
+              documentation = {
+                enable = true,
+                keywords = { enable = true },
+              },
+              links = { enable = true },
             },
             inlayHints = {
               bindingModeHints = { enable = true },

@@ -20,8 +20,8 @@ return {
     -- Auto-disable heavy features on large files
     bigfile = { enabled = true },
 
-    -- Smooth scrolling
-    scroll = { enabled = true },
+    -- Smooth scrolling disabled
+    scroll = { enabled = false },
 
     -- Lazygit integration
     lazygit = { enabled = true },
@@ -58,6 +58,7 @@ return {
           { icon = " ", key = "g", desc = "Live Grep",    action = ":lua Snacks.dashboard.pick('live_grep')" },
           { icon = " ", key = "r", desc = "Recent Files", action = ":lua Snacks.dashboard.pick('oldfiles')" },
           { icon = " ", key = "c", desc = "Config",       action = ":lua Snacks.dashboard.pick('files', {cwd = vim.fn.stdpath('config')})" },
+          { icon = "󰏘 ", key = "t", desc = "Colorscheme",  action = ":lua require('colorscheme').pick()" },
           { icon = "󰒲 ", key = "L", desc = "Lazy",        action = ":Lazy" },
           { icon = " ", key = "q", desc = "Quit",         action = ":qa" },
         },

@@ -10,11 +10,11 @@ return {
 			statementStyle = { bold = true },
 			transparent = false,
 			terminalColors = true,
-			theme = "wave",
+			theme = "dragon",
 			overrides = function(colors)
 				local theme = colors.theme
 				return {
-					LspInlayHint    = { link = "CodeiumSuggestion" },
+					LspInlayHint    = { fg = theme.ui.fg_dim, italic = true },
 					-- cursorlineopt="number" — highlight only the number; make it pop
 					CursorLineNr    = { fg = colors.palette.carpYellow, bold = true },
 
@@ -38,7 +38,8 @@ return {
 			end,
 		})
 
-		vim.cmd("colorscheme kanagawa-wave")
+		-- The active colorscheme is applied centrally by lua/colorscheme.lua
+		-- (which persists the user's choice), so we only register/compile here.
 	end,
 	init = function()
 		vim.opt.background = "dark"

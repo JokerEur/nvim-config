@@ -3,6 +3,7 @@ return {
   {
     "L3MON4D3/LuaSnip",
     event = "InsertEnter",
+    dependencies = { "rafamadriz/friendly-snippets" },
     config = function()
       require("luasnip").config.setup({
         history = true,
@@ -92,6 +93,21 @@ return {
           -- Scroll documentation without leaving insert mode
           ["<C-f>"] = cmp.mapping.scroll_docs(4),
           ["<C-b>"] = cmp.mapping.scroll_docs(-4),
+          -- Tab: jump luasnip placeholders only (no completion navigation)
+          ["<Tab>"] = cmp.mapping(function(fallback)
+            if luasnip.expand_or_jumpable() then
+              luasnip.expand_or_jump()
+            else
+              fallback()
+            end
+          end, { "i", "s" }),
+          ["<S-Tab>"] = cmp.mapping(function(fallback)
+            if luasnip.jumpable(-1) then
+              luasnip.jump(-1)
+            else
+              fallback()
+            end
+          end, { "i", "s" }),
         }),
 
         -- Prioritized sources with limits
@@ -99,8 +115,8 @@ return {
           { name = "nvim_lsp", priority = 1000, max_item_count = 12 },
           { name = "luasnip", priority = 750, max_item_count = 3 },
           { name = "path", priority = 500 },
-          { 
-            name = "buffer", 
+          {
+            name = "buffer",
             priority = 250,
             max_item_count = 5,
             option = {
@@ -129,7 +145,7 @@ return {
           debounce = 60,
           throttle = 20,
           max_view_entries = 12,
-          fetching_timeout = 200,
+          fetching_timeout = 1000,
         },
 
         -- Completion behavior - IMPORTANT: Remove autocomplete triggers
@@ -156,7 +172,7 @@ return {
 
         -- Disable completion in huge or special buffers to keep things snappy
         enabled = function()
-          local ok, stats = pcall(vim.loop.fs_stat, vim.api.nvim_buf_get_name(0))
+          local ok, stats = pcall(vim.uv.fs_stat, vim.api.nvim_buf_get_name(0))
           if ok and stats and stats.size and stats.size > 512 * 1024 then -- > 512KB
             return false
           end
@@ -166,8 +182,7 @@ return {
             return false
           end
 
-          local buftype = vim.api.nvim_buf_get_option(0, "buftype")
-          if buftype == "prompt" then
+          if vim.bo.buftype == "prompt" then
             return false
           end
 
@@ -192,17 +207,6 @@ return {
       -- Global optimizations
       vim.o.completeopt = "menu,menuone,noselect,noinsert"
       vim.o.pumheight = 10
-      vim.o.pumblend = 0  -- Disable transparency for speed
-      vim.o.updatetime = 300
-      
-      -- Disable Neovim's native completion menu style
-      vim.cmd([[
-        augroup CmpStyles
-          autocmd!
-          autocmd VimEnter * set completeopt=menu,menuone,noselect,noinsert
-          autocmd FileType * set completeopt=menu,menuone,noselect,noinsert
-        augroup END
-      ]])
 
       -- Make completion source/signature column less prominent than main text
       vim.api.nvim_create_autocmd("ColorScheme", {

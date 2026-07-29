@@ -1,5 +1,5 @@
 local lazypath = vim.fn.stdpath("data") .. "/lazy/lazy.nvim"
-if not vim.loop.fs_stat(lazypath) then
+if not vim.uv.fs_stat(lazypath) then
 	vim.fn.system({
 		"git",
 		"clone",
@@ -27,5 +27,15 @@ if vim.lsp and not vim.lsp._buf_get_clients_shim_applied then
   end
 end
 
+vim.lsp.set_log_level("ERROR")
+
 require("nvim-options")
-require("lazy").setup("plugins")
+require("lazy").setup({
+	{ import = "plugins" },
+	{ import = "colorschemes" },
+})
+
+-- Apply the user's persisted colorscheme (see lua/colorscheme.lua).
+-- Colorscheme plugins in lua/colorschemes/ are loaded at startup (priority
+-- 1000) and only register their schemes; the active one is chosen here.
+require("colorscheme").apply()

@@ -10,7 +10,7 @@ return {
 			local function disable_large_files(_, buf)
 				local max_filesize = 256 * 1024 -- 256 KB
 				local fname = vim.api.nvim_buf_get_name(buf)
-				local stat = vim.loop.fs_stat(fname)
+				local stat = vim.uv.fs_stat(fname)
 				return stat and stat.size > max_filesize
 			end
 

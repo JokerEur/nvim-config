@@ -1,14 +1,14 @@
 ---FOR WORK---
-vim.cmd("set shiftwidth=4")
-vim.cmd("set tabstop=4")
+vim.opt.shiftwidth = 4
+vim.opt.tabstop    = 4
 
 ---FOR PERSONAL---
--- vim.cmd("set shiftwidth=2")
--- vim.cmd("set tabstop=2")
+-- vim.opt.shiftwidth = 2
+-- vim.opt.tabstop    = 2
 
-vim.cmd("set relativenumber")
-vim.cmd("set nu rnu")
-vim.g.mapleader = " "
+vim.opt.number         = true
+vim.opt.relativenumber = true
+vim.g.mapleader        = " "
 
 -- Editing comfort
 vim.opt.scrolloff      = 8
@@ -38,6 +38,8 @@ vim.opt.swapfile  = false  -- swap causes disk I/O on every write
 -- Rendering performance
 vim.opt.synmaxcol  = 240   -- stop syntax on very long lines
 vim.opt.redrawtime = 1500  -- give more time before disabling syntax
+vim.opt.updatetime = 250   -- faster CursorHold events (default 4000ms)
+vim.opt.timeoutlen = 300   -- faster which-key popup (default 1000ms)
 
 -- Informative UI
 vim.opt.list        = true

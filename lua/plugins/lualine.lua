@@ -1,24 +1,46 @@
 return {
 	"nvim-lualine/lualine.nvim",
 	dependencies = { "nvim-tree/nvim-web-devicons" },
-	event = "VeryLazy", -- Faster loading
+	event = "VeryLazy",
 	config = function()
-		-- Kanagawa color palette (wave theme)
-		local colors = {
-			bg = "#1F1F28", -- Kanagawa background
-			fg = "#DCD7BA", -- Foreground
-			yellow = "#E6C384", -- Yellow
-			cyan = "#7FB4CA", -- Cyan
-			darkblue = "#7E9CD8", -- Blue
-			green = "#98BB6C", -- Green
-			orange = "#FFA066", -- Orange
-			violet = "#957FB8", -- Violet
-			magenta = "#C8A3D9", -- Magenta
-			blue = "#7FB4CA", -- Light blue
-			red = "#E46876", -- Red
-			waveBlue = "#7E9CD8", -- Wave theme blue
-			crystalBlue = "#7EB3C8", -- Crystal blue
-		}
+		-- Read a color attribute ("fg"/"bg") from a highlight group and return it
+		-- as "#rrggbb", following links. Returns nil when the group/attr is unset
+		-- so callers can fall back.
+		local function hl(name, attr)
+			local ok, h = pcall(vim.api.nvim_get_hl, 0, { name = name, link = false })
+			if not ok or not h then return nil end
+			local v = h[attr]
+			if type(v) ~= "number" then return nil end
+			return string.format("#%06x", v)
+		end
+
+		-- First group that actually defines `attr`, else the hardcoded fallback.
+		local function pick(attr, groups, fallback)
+			for _, g in ipairs(groups) do
+				local c = hl(g, attr)
+				if c then return c end
+			end
+			return fallback
+		end
+
+		-- Derive the palette from the ACTIVE colorscheme's highlight groups.
+		-- Semantic slots map to widely-defined standard groups, so the statusline
+		-- follows whatever scheme is loaded (kanagawa, moonfly, …). The fallbacks
+		-- are the old kanagawa-wave values, used only if a group is missing.
+		local function get_colors()
+			return {
+				bg      = pick("bg", { "StatusLine", "Normal" }, "#1F1F28"),
+				fg      = pick("fg", { "Normal" }, "#DCD7BA"),
+				yellow  = pick("fg", { "DiagnosticWarn", "WarningMsg" }, "#E6C384"),
+				cyan    = pick("fg", { "DiagnosticInfo", "Special" }, "#7FB4CA"),
+				green   = pick("fg", { "String", "DiagnosticOk", "DiagnosticHint" }, "#98BB6C"),
+				orange  = pick("fg", { "Constant", "Number" }, "#FFA066"),
+				violet  = pick("fg", { "Statement", "Keyword" }, "#957FB8"),
+				magenta = pick("fg", { "Identifier", "Type" }, "#C8A3D9"),
+				red     = pick("fg", { "DiagnosticError", "ErrorMsg" }, "#E46876"),
+				accent  = pick("fg", { "Function" }, "#7E9CD8"),
+			}
+		end
 
 		local conditions = {
 			buffer_not_empty = function()
@@ -27,131 +49,7 @@ return {
 			hide_in_width = function()
 				return vim.fn.winwidth(0) > 80
 			end,
-			check_git_workspace = function()
-				local filepath = vim.fn.expand("%:p:h")
-				local gitdir = vim.fn.finddir(".git", filepath .. ";")
-				return gitdir and #gitdir > 0 and #gitdir < #filepath
-			end,
 		}
-
-		local config = {
-			options = {
-				component_separators = { left = "", right = "" },
-				section_separators = { left = "", right = "" },
-				theme = "kanagawa", -- Use built-in Kanagawa theme
-				globalstatus = true, -- Single statusline for all windows
-				disabled_filetypes = { statusline = { "dashboard", "alpha" } },
-			},
-			sections = {
-				lualine_a = {},
-				lualine_b = {},
-				lualine_y = {},
-				lualine_z = {},
-				lualine_c = {},
-				lualine_x = {},
-			},
-			inactive_sections = {
-				lualine_a = {},
-				lualine_b = {},
-				lualine_y = {},
-				lualine_z = {},
-				lualine_c = {},
-				lualine_x = {},
-			},
-			extensions = { "neo-tree", "lazy" },
-		}
-
-		local function ins_left(component)
-			table.insert(config.sections.lualine_c, component)
-		end
-
-		local function ins_right(component)
-			table.insert(config.sections.lualine_x, component)
-		end
-
-		-- Left section - Enhanced visual design
-		ins_left({
-			function()
-				return ""
-			end,
-			color = { fg = colors.waveBlue, bg = colors.bg },
-			padding = { left = 0, right = 0 },
-		})
-		ins_left({
-			"mode",
-			fmt = function(str)
-				local mode_map = {
-					n = "NORMAL",
-					i = "INSERT",
-					v = "VISUAL",
-					V = "V-LINE",
-					[""] = "V-BLOCK",
-					c = "COMMAND",
-					s = "SELECT",
-					S = "S-LINE",
-					ic = "INSERT",
-					R = "REPLACE",
-					Rv = "V-REPLACE",
-					cv = "COMMAND",
-					ce = "COMMAND",
-					r = "PROMPT",
-					rm = "MORE",
-					["r?"] = "CONFIRM",
-					["!"] = "SHELL",
-					t = "TERMINAL",
-				}
-				return mode_map[str] or str
-			end,
-			color = { fg = colors.bg, bg = colors.waveBlue, gui = "bold" },
-			padding = { left = 1, right = 1 },
-		})
-		ins_left({
-			function()
-				return ""
-			end,
-			color = { fg = colors.waveBlue, bg = "transparent" },
-			padding = { left = 0, right = 1 },
-		})
-
-		ins_left({
-			"filesize",
-			cond = conditions.buffer_not_empty,
-			color = { fg = colors.cyan, gui = "italic" },
-		})
-
-		ins_left({
-			"filename",
-			cond = conditions.buffer_not_empty,
-			color = { fg = colors.magenta, gui = "bold" },
-			symbols = { modified = "  ", readonly = "  ", unnamed = "  " },
-		})
-
-		ins_left({
-			"location",
-			color = { fg = colors.yellow },
-		})
-
-		ins_left({
-			"progress",
-			color = { fg = colors.fg, gui = "bold" },
-			fmt = function()
-				return "%P:%L"
-			end,
-		})
-
-		ins_left({
-			"diagnostics",
-			sources = { "nvim_diagnostic" },
-			symbols = { error = " ", warn = " ", info = " ", hint = " " },
-			diagnostics_color = {
-				error = { fg = colors.red },
-				warn = { fg = colors.yellow },
-				info = { fg = colors.cyan },
-				hint = { fg = colors.green },
-			},
-			colored = true,
-			update_in_insert = false,
-		})
 
 		-- LSP display (cached): statusline re-renders a lot; keep this O(1) per redraw.
 		local lsp_cache = {}
@@ -161,37 +59,13 @@ return {
 				return ""
 			end
 
-			local client_names = {}
+			local names = {}
 			for _, client in ipairs(clients) do
-				if client.name ~= "null-ls" then
-					client_names[#client_names + 1] = client.name
-				end
+				names[#names + 1] = client.name
 			end
 
-			if #client_names == 0 then
-				return ""
-			end
-
-			-- Optional: show null-ls formatters *only if null-ls is already loaded*.
-			local formatters = {}
-			local null_ls = package.loaded["null-ls"]
-			if null_ls and null_ls.get_sources and null_ls.methods then
-				local buf_ft = vim.bo[bufnr].filetype
-				for _, source in ipairs(null_ls.get_sources() or {}) do
-					if source.filetypes and vim.tbl_contains(source.filetypes, buf_ft) then
-						if source.method == null_ls.methods.FORMATTING then
-							formatters[#formatters + 1] = source.name
-						end
-					end
-				end
-			end
-
-			local parts = { " " .. table.concat(client_names, ", ") }
-			if #formatters > 0 then
-				parts[#parts + 1] = " " .. table.concat(formatters, ", ")
-			end
-
-			return table.concat(parts, " | ")
+			if #names == 0 then return "" end
+			return " " .. table.concat(names, ", ")
 		end
 
 		local function update_lsp_cache(bufnr)
@@ -219,101 +93,209 @@ return {
 			end,
 		})
 
-		ins_left({
-			function()
-				local bufnr = vim.api.nvim_get_current_buf()
-				local seg = lsp_cache[bufnr]
-				if seg == nil then
-					update_lsp_cache(bufnr)
-					seg = lsp_cache[bufnr]
-				end
-				return seg or ""
+		-- Build the full lualine config against the CURRENT palette. Called on
+		-- first setup and again on every ColorScheme so component colors track
+		-- the active scheme instead of being frozen to kanagawa.
+		local function build_config()
+			local colors = get_colors()
+
+			local config = {
+				options = {
+					component_separators = { left = "", right = "" },
+					section_separators = { left = "", right = "" },
+					-- "auto" derives the section palette from the active
+					-- colorscheme, so it adapts when you switch schemes.
+					theme = "auto",
+					globalstatus = true,
+					disabled_filetypes = { statusline = { "dashboard", "alpha" } },
+				},
+				sections = {
+					lualine_a = {},
+					lualine_b = {},
+					lualine_y = {},
+					lualine_z = {},
+					lualine_c = {},
+					lualine_x = {},
+				},
+				inactive_sections = {
+					lualine_a = {},
+					lualine_b = {},
+					lualine_y = {},
+					lualine_z = {},
+					lualine_c = {},
+					lualine_x = {},
+				},
+				extensions = { "neo-tree", "lazy" },
+			}
+
+			local function ins_left(component)
+				table.insert(config.sections.lualine_c, component)
+			end
+
+			local function ins_right(component)
+				table.insert(config.sections.lualine_x, component)
+			end
+
+			-- Left section
+			ins_left({
+				"mode",
+				fmt = function(str)
+					local mode_map = {
+						n = "NORMAL",
+						i = "INSERT",
+						v = "VISUAL",
+						V = "V-LINE",
+						[""] = "V-BLOCK",
+						c = "COMMAND",
+						s = "SELECT",
+						S = "S-LINE",
+						ic = "INSERT",
+						R = "REPLACE",
+						Rv = "V-REPLACE",
+						cv = "COMMAND",
+						ce = "COMMAND",
+						r = "PROMPT",
+						rm = "MORE",
+						["r?"] = "CONFIRM",
+						["!"] = "SHELL",
+						t = "TERMINAL",
+					}
+					return mode_map[str] or str
+				end,
+				color = { fg = colors.bg, bg = colors.accent, gui = "bold" },
+				padding = { left = 1, right = 1 },
+			})
+
+			ins_left({
+				"filesize",
+				cond = conditions.buffer_not_empty,
+				color = { fg = colors.cyan, gui = "italic" },
+			})
+
+			ins_left({
+				"filename",
+				cond = conditions.buffer_not_empty,
+				color = { fg = colors.magenta, gui = "bold" },
+				symbols = { modified = "  ", readonly = "  ", unnamed = "  " },
+			})
+
+			ins_left({
+				"location",
+				color = { fg = colors.yellow },
+			})
+
+			ins_left({
+				"progress",
+				color = { fg = colors.fg, gui = "bold" },
+				fmt = function()
+					return "%P:%L"
+				end,
+			})
+
+			ins_left({
+				"diagnostics",
+				sources = { "nvim_diagnostic" },
+				symbols = { error = " ", warn = " ", info = " ", hint = " " },
+				diagnostics_color = {
+					error = { fg = colors.red },
+					warn = { fg = colors.yellow },
+					info = { fg = colors.cyan },
+					hint = { fg = colors.green },
+				},
+				colored = true,
+				update_in_insert = false,
+			})
+
+			ins_left({
+				function()
+					local bufnr = vim.api.nvim_get_current_buf()
+					local seg = lsp_cache[bufnr]
+					if seg == nil then
+						update_lsp_cache(bufnr)
+						seg = lsp_cache[bufnr]
+					end
+					return seg or ""
+				end,
+				color = { fg = colors.fg, gui = "italic" },
+				cond = conditions.hide_in_width,
+			})
+
+			-- Macro recording indicator
+			ins_left({
+				function()
+					local reg = vim.fn.reg_recording()
+					return reg ~= "" and ("  @" .. reg) or ""
+				end,
+				color = { fg = colors.red, gui = "bold" },
+			})
+
+			-- Search count
+			ins_left({
+				function()
+					if vim.v.hlsearch == 0 then return "" end
+					local ok, count = pcall(vim.fn.searchcount, { recompute = true, maxcount = 999 })
+					if not ok or count.total == 0 then return "" end
+					return string.format("  %d/%d", count.current, count.total)
+				end,
+				color = { fg = colors.cyan },
+			})
+
+			ins_left({
+				function()
+					return "%="
+				end,
+			})
+
+			-- Right section
+			ins_right({
+				"o:encoding",
+				fmt = string.upper,
+				cond = conditions.hide_in_width,
+				color = { fg = colors.green, gui = "bold" },
+			})
+
+			ins_right({
+				"fileformat",
+				fmt = string.upper,
+				icons_enabled = true,
+				symbols = { unix = " ", dos = " ", mac = " " },
+				color = { fg = colors.green, gui = "bold" },
+			})
+
+			ins_right({
+				"branch",
+				icon = "",
+				color = { fg = colors.violet, gui = "bold" },
+			})
+
+			ins_right({
+				"diff",
+				symbols = { added = " ", modified = " ", removed = " " },
+				diff_color = {
+					added = { fg = colors.green },
+					modified = { fg = colors.orange },
+					removed = { fg = colors.red },
+				},
+				cond = conditions.hide_in_width,
+			})
+
+			ins_right({
+				"filetype",
+				color = { fg = colors.accent, gui = "bold" },
+				padding = { left = 1, right = 1 },
+			})
+
+			return config
+		end
+
+		require("lualine").setup(build_config())
+
+		-- Re-derive component colors from the new scheme on every switch.
+		vim.api.nvim_create_autocmd("ColorScheme", {
+			group = vim.api.nvim_create_augroup("lualine_follow_colorscheme", { clear = true }),
+			callback = function()
+				require("lualine").setup(build_config())
 			end,
-			color = { fg = colors.fg, gui = "italic" },
-			cond = conditions.hide_in_width,
 		})
-
-		-- Macro recording indicator
-		ins_left({
-			function()
-				local reg = vim.fn.reg_recording()
-				return reg ~= "" and ("  @" .. reg) or ""
-			end,
-			color = { fg = colors.red, gui = "bold" },
-		})
-
-		-- Search count
-		ins_left({
-			function()
-				if vim.v.hlsearch == 0 then return "" end
-				local ok, count = pcall(vim.fn.searchcount, { recompute = true, maxcount = 999 })
-				if not ok or count.total == 0 then return "" end
-				return string.format("  %d/%d", count.current, count.total)
-			end,
-			color = { fg = colors.cyan },
-		})
-
-		ins_left({
-			function()
-				return "%="
-			end,
-		})
-
-		-- Right section - Enhanced design
-		ins_right({
-			"o:encoding",
-			fmt = string.upper,
-			cond = conditions.hide_in_width,
-			color = { fg = colors.green, gui = "bold" },
-		})
-
-		ins_right({
-			"fileformat",
-			fmt = string.upper,
-			icons_enabled = true,
-			symbols = { unix = " ", dos = " ", mac = " " },
-			color = { fg = colors.green, gui = "bold" },
-		})
-
-		ins_right({
-			"branch",
-			icon = "",
-			color = { fg = colors.violet, gui = "bold" },
-		})
-
-		ins_right({
-			"diff",
-			symbols = { added = " ", modified = " ", removed = " " },
-			diff_color = {
-				added = { fg = colors.green },
-				modified = { fg = colors.orange },
-				removed = { fg = colors.red },
-			},
-			cond = conditions.hide_in_width,
-		})
-
-		-- Right side visual separator
-		ins_right({
-			function()
-				return ""
-			end,
-			color = { fg = colors.crystalBlue, bg = "transparent" },
-			padding = { left = 1, right = 0 },
-		})
-		ins_right({
-			"filetype",
-			color = { fg = colors.bg, bg = colors.crystalBlue, gui = "bold" },
-			padding = { left = 1, right = 1 },
-		})
-		ins_right({
-			function()
-				return ""
-			end,
-			color = { fg = colors.crystalBlue, bg = colors.bg },
-			padding = { left = 0, right = 0 },
-		})
-
-		-- Apply configuration
-		require("lualine").setup(config)
 	end,
 }
