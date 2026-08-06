@@ -91,7 +91,7 @@ install_macos() {
     python          # pyright, debugpy
     go              # gopls, delve
     rust            # rust-analyzer, codelldb, cargo, clippy
-    cmake           # cmake LSP + сборка некоторых пакетов
+    cmake           # cmake-language-server + сборка некоторых пакетов
     make            # telescope-fzf-native, treesitter
     wget curl unzip # Mason скачивает и распаковывает бинарники
     lazygit         # опционально, удобно для git-плагинов
@@ -129,6 +129,7 @@ install_arch() {
     rust            # rust-analyzer, cargo, clippy
     cmake
     wget curl unzip # Mason
+    lazygit         # snacks.nvim: <leader>gg и git-плагины
     wl-clipboard    # системный буфер обмена (unnamedplus) в Wayland
     xclip           # то же для X11
     ttf-jetbrains-mono-nerd-font  # иконки
@@ -165,6 +166,17 @@ for bin in nvim git rg fd node npm python3 go cargo cc make unzip curl; do
   check "$bin"
 done
 
+# ── Claude Code CLI (нужен плагину claudecode.nvim) ──────────────────────────
+if command -v claude >/dev/null 2>&1; then
+  ok "claude CLI уже установлен → $(command -v claude)"
+elif command -v npm >/dev/null 2>&1; then
+  info "Устанавливаю Claude Code CLI (для claudecode.nvim)…"
+  npm install -g @anthropic-ai/claude-code \
+    || warn "Не удалось поставить claude CLI через npm — поставьте вручную: npm i -g @anthropic-ai/claude-code"
+else
+  warn "npm недоступен — пропускаю установку claude CLI (нужен для <leader>ac)."
+fi
+
 # ── Синхронизация плагинов и Mason-пакетов ──────────────────────────────────
 if [[ "$DO_SYNC" -eq 1 ]]; then
   info "Синхронизирую плагины (lazy.nvim) — первый запуск может занять пару минут…"
@@ -175,7 +187,7 @@ if [[ "$DO_SYNC" -eq 1 ]]; then
 
   info "Ставлю LSP-серверы и debug-адаптеры через Mason…"
   nvim --headless \
-    "+MasonInstall lua-language-server rust-analyzer clangd pyright gopls typescript-language-server html-lsp css-lsp debugpy delve codelldb js-debug-adapter" \
+    "+MasonInstall lua-language-server rust-analyzer clangd pyright gopls typescript-language-server html-lsp css-lsp cmake-language-server debugpy delve codelldb js-debug-adapter" \
     +qa || warn "Часть Mason-пакетов могла не установиться — доустановите через :Mason."
 else
   warn "Флаг --no-sync: пропускаю синхронизацию плагинов. Запустите nvim вручную."
